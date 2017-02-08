@@ -32,10 +32,10 @@ server <- function(input, output) {
 ui = tagList(
   navbarPage(
     theme = shinytheme("spacelab"),
-    "Кластеризация",
-    tabPanel("Раздел 1",
+    "Clustering",
+    tabPanel("Navbar 1",
              sidebarPanel(
-               fileInput('datafile', 'Выбрать файл для загрузки',
+               fileInput('datafile', 'Choose file to upload',
                          accept = c(
                            'text/csv',
                            'text/comma-separated-values',
@@ -75,26 +75,26 @@ ui = tagList(
              ),
              mainPanel(
                tabsetPanel(
-                 tabPanel("Вкладка 1",
-                          h4("Таблица"),
+                 tabPanel("Tab 1",
+                          h4("Table"),
                           tableOutput("contents"),
                           
-                          h4("Пока что это приложение ничего не делает"),
+                          h4("This sample is doing nothing"),
                           # verbatimTextOutput("text output"),
-                          h1("Заголовок 1"),
-                          h2("Заголовок 2"),
-                          h3("Заголовок 3"),
-                          h4("Заголовок 4"),
-                          h5("Заголовок 5")
+                          h1("Header 1"),
+                          h2("Header 2"),
+                          h3("Header 3"),
+                          h4("Header 4"),
+                          h5("Header 5")
                  ),
-                 tabPanel("Вкладка 2",
+                 tabPanel("Tab 2",
                           DT::dataTableOutput('mytable1')),
-                 tabPanel("Вкладка 3")
+                 tabPanel("Tab 3")
                )
              )
     ),
-    tabPanel("Раздел 2"),
-    tabPanel("Раздел 3")
+    tabPanel("Navbar 2"),
+    tabPanel("Navbar 3")
   )
 )
 
