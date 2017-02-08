@@ -1,2 +1,2 @@
 # shiny-app
-Basic Shiny app
+An R Shiny app for points clustering.
