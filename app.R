@@ -6,7 +6,7 @@ library(shinythemes)
 options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output) {
-  output$contents <- renderTable({
+    output$contents <- renderTable({
     # input$file1 will be NULL initially. After the user selects
     # and uploads a file, it will be a data frame with 'name',
     # 'size', 'type', and 'datapath' columns. The 'datapath'
@@ -20,7 +20,13 @@ server <- function(input, output) {
     
     read.csv(inFile$datapath, header = input$header,
              sep = input$sep, quote = input$quote)
-  })
+    })
+
+    output$mytable1 <- DT::renderDataTable({
+    inFile <- input$datafile
+    DT::datatable(read.csv(inFile$datapath, header = input$header,
+    sep = input$sep, quote = input$quote))
+})
   
 }
 
@@ -83,11 +89,14 @@ ui = tagList(
                           h4("Header 4"),
                           h5("Header 5")
                  ),
-		tabPanel("Tab 2"),
+		tabPanel("Tab 2",
+			DT::dataTableOutput('mytable1')),
 		tabPanel("Tab 3")
                )
              )
-    )
+    ),
+    tabPanel("Navbar 2"),
+    tabPanel("Navbar 3")
   )
 )
 
