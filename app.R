@@ -22,11 +22,6 @@ server <- function(input, output) {
              sep = input$sep, quote = input$quote)
   })
   
-  output$mytable1 <- DT::renderDataTable({
-    inFile <- input$datafile
-    DT::datatable(read.csv(inFile$datapath, header = input$header,
-                           sep = input$sep, quote = input$quote))
-  })
 }
 
 ui = tagList(
@@ -69,9 +64,10 @@ ui = tagList(
                sliderInput("slider", "Slider input:", 1, 100, 30),
                tags$h5("Deafult actionButton:"),
                actionButton("action", "Search"),
-               
+
                tags$h5("actionButton with CSS class:"),
                actionButton("action2", "Action button", class = "btn-primary")
+
              ),
              mainPanel(
                tabsetPanel(
@@ -80,21 +76,18 @@ ui = tagList(
                           tableOutput("contents"),
                           
                           h4("This sample is doing nothing"),
-                          # verbatimTextOutput("text output"),
+                          verbatimTextOutput("text output"),
                           h1("Header 1"),
                           h2("Header 2"),
                           h3("Header 3"),
                           h4("Header 4"),
                           h5("Header 5")
                  ),
-                 tabPanel("Tab 2",
-                          DT::dataTableOutput('mytable1')),
-                 tabPanel("Tab 3")
+		tabPanel("Tab 2"),
+		tabPanel("Tab 3")
                )
              )
-    ),
-    tabPanel("Navbar 2"),
-    tabPanel("Navbar 3")
+    )
   )
 )
 
