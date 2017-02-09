@@ -4,14 +4,12 @@ library(shinythemes)
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
 options(shiny.maxRequestSize = 1024*1024^2)
-df <- NULL
-col.names <- c()
 
-server <- function(input, output) {
+server <- function(input, output, clientData, session) {
   getTable <- reactive({
-    df <<- read.csv(input$datafile$datapath, header = input$header,
+    df <- read.csv(input$datafile$datapath, header = input$header,
              sep = input$sep, quote = input$quote)
-    col.names <<- colnames(df)
+    updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     df
   })
   
@@ -24,7 +22,8 @@ server <- function(input, output) {
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
                                searching=FALSE,
-                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
+                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json'),
+                               order = lapply(input$sortColumns, function(x) list(which(colnames(getTable()) == x), 'asc'))
                   ))
   })
   
@@ -59,7 +58,7 @@ ui = tagList(
                #                            '"'),
                tags$hr(),
                selectizeInput(
-                 'sortColumns', 'Сортировать по', choices = colnames(df), multiple = TRUE
+                 'sortColumns', 'Сортировать по', choices = NULL, multiple = TRUE
                ),
                tags$hr(),
                p('Для тестирования можете загрузить примеры файлов .csv or .tsv:',
@@ -71,7 +70,9 @@ ui = tagList(
                DT::dataTableOutput('maintable'))
     ),
     tabPanel("Информация",
-             sidebarPanel(),
+             sidebarPanel(
+               downloadButton('downloadData', 'Download')
+             ),
              mainPanel()
     ),
     tabPanel("Корреляция",
