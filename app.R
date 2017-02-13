@@ -7,6 +7,8 @@ library(ggplot2)
 options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output, clientData, session) {
+  inFile <- reactive(input$datafile)
+  
   subsetCols <- c()
   subsetRows <- c()
   
@@ -24,11 +26,12 @@ server <- function(input, output, clientData, session) {
   })
   
   getSubsetCols <- reactive({
-    if(input$subsetCols == "") {
+    s <- gsub(" ", "", input$subsetCols, fixed = TRUE)
+    if(s == "") {
       return(colnames(getTable()))
     }
     
-    lapply(strsplit(input$subsetCols, ",")[[1]], function(x) {
+    lapply(strsplit(s, ",")[[1]], function(x) {
       ifelse(grepl("-", x), 
              {
                l <- strsplit(x, "-")
@@ -38,10 +41,11 @@ server <- function(input, output, clientData, session) {
   })
   
   getSubsetRows <- reactive({
-    if(input$subsetRows == "") {
+    s <- gsub(" ", "", input$subsetRows, fixed = TRUE)
+    if(s == "") {
       return(rownames(getTable()))
     }
-    lapply(strsplit(input$subsetRows, ",")[[1]], function(x) {
+    lapply(strsplit(s, ",")[[1]], function(x) {
       ifelse(grepl("-", x), 
              {
                l <- strsplit(x, "-")
@@ -51,8 +55,7 @@ server <- function(input, output, clientData, session) {
   })
   
   output$maintable <- DT::renderDataTable({
-    inFile <- input$datafile
-    if (is.null(inFile)) {
+    if (is.null(inFile())) {
       return(NULL)
     }
     DT::datatable(getTable(),
@@ -65,8 +68,7 @@ server <- function(input, output, clientData, session) {
   })
   
   output$outInfoColumn <- renderPrint({
-    inFile <- input$datafile
-    if (is.null(inFile)) {
+    if (is.null(inFile())) {
       return(NULL)
     }
     arr <- getTable()[, input$infoColumn]
@@ -74,39 +76,69 @@ server <- function(input, output, clientData, session) {
     })
   
   output$densityPlot <- renderPlot({
-    inFile <- input$datafile
-    if (is.null(inFile)) {
+    if (is.null(inFile())) {
       return(NULL)
     }
     
     ggplot(getTable(), aes(x=input$infoColumn)) + geom_density()
   })
   
+  output$dendrogram <- renderPlot({
+    hc <- hclust(dist(getSubTable()), method=input$clusteringMethod)
+    plot(hc)
+  })
+  
+  getCorrMatrix <- reactive({
+    cor(getSubTable())
+  })
+  
+  getCovMatrix <- reactive({
+    cov(getSubTable())
+  })
+  
+  output$corrMatrix <- renderTable({
+    getCorrMatrix()
+  })
+  
+  output$covMatrix <- renderTable({
+    getCovMatrix()
+  })
+  
   # downloadHandler() takes two arguments, both functions.
   # The content function is passed a filename as an argument, and
   #   it should write out data to that filename.
   output$downloadData <- downloadHandler(
-    
     # This function returns a string which tells the client
     # browser what name to use when saving the file.
-    filename = function() {
-      paste(input$datafile, input$filetype, sep = ".")
-    },
+    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv", sep = ""),
     
     # This function should write data to a file given to it by
     # the argument 'file'.
     content = function(file) {
-      sep <- switch(input$filetype, "csv" = ",", "tsv" = "\t")
-      
       # Write to a file specified by the 'file' argument
-      # write.table(subtable, file, sep = sep,
-      #            row.names = FALSE)
+      write.table(getSubTable(), file, sep=",",
+                  row.names = FALSE)
+    }
+  )
+  
+  output$downloadCorr <- downloadHandler(
+    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_corr", ".csv", sep = ""),
+    content = function(file) {
+      write.table(getCorrMatrix(), file, sep=",",
+                  row.names = FALSE)
+    }
+  )
+  
+  output$downloadCov <- downloadHandler(
+    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_cov", ".csv", sep = ""),
+    content = function(file) {
+      write.table(getCovMatrix(), file, sep=",",
+                  row.names = FALSE)
     }
   )
   
   output$subtable <- DT::renderDataTable({
-    inFile <- input$datafile
-    if (is.null(inFile)) {
+    if (is.null(inFile())) {
       return(NULL)
     }
     DT::datatable(getSubTable(),
@@ -161,32 +193,51 @@ ui = tagList(
     ),
     tabPanel("Подбаза",
              sidebarPanel(
+               p("Номера строк и столбцов следует указывать через запятую, ",
+                 "интервалы можно указывать через тире. Например: 1,2,3-10,15-17,20"),
                textInput("subsetCols", "Столбцы подбазы:"),
                textInput("subsetRows", "Строки подбазы:"),
-               textInput("n", "N"),
+               # textInput("n", "N"),
                tags$hr(),
-               downloadButton('downloadData', 'Скачать')
+               downloadButton('downloadData', 'Скачать csv')
              ),
              mainPanel(
-               DT::dataTableOutput('subtable')
+               DT::dataTableOutput("subtable")
              )
     ),
     tabPanel("Информация",
              sidebarPanel(
-               selectInput('infoColumn', 'Выберите столбец', choices=NULL, selectize=TRUE)
+               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE)
              ),
              mainPanel(
-               verbatimTextOutput('outInfoColumn'),
+               verbatimTextOutput("outInfoColumn"),
                plotOutput("densityPlot")
              )
     ),
-    tabPanel("Корреляция",
-             sidebarPanel(),
-             mainPanel()
+    tabPanel("Матрицы",
+             # sidebarPanel(),
+             mainPanel(
+               h4("Матрица корреляции:"),
+               tableOutput("corrMatrix"),
+               downloadButton('downloadCorr', 'Скачать csv'),
+               tags$hr(),
+               h4("Матрица ковариации:"),
+               tableOutput("covMatrix"),
+               downloadButton('downloadCov', 'Скачать csv')
+             )
     ),
     tabPanel("Кластеризация",
-             sidebarPanel(),
-             mainPanel()
+             sidebarPanel(
+               radioButtons("clusteringMethod", "Метод кластеризации", 
+                            choices=c("полной связи"="complete",
+                                      "одиночной связи"="single",
+                                      "средней связи"="average"
+                                      ))
+             ),
+             mainPanel(
+               h4("Дендрограмма:"),
+               plotOutput("dendrogram")
+             )
     )
   )
 )
