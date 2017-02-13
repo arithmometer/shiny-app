@@ -13,7 +13,7 @@ server <- function(input, output, clientData, session) {
   subsetRows <- c()
   
   getTable <- reactive({
-    df <- read.csv(input$datafile$datapath, header = input$header,
+    df <- read.csv(inFile()$datapath, header = input$header,
              sep = input$sep, quote = input$quote)
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     df
@@ -67,6 +67,10 @@ server <- function(input, output, clientData, session) {
                   ))
   })
   
+  output$debug <- reactive({
+    input$infoColumn
+  })
+  
   output$outInfoColumn <- renderPrint({
     if (is.null(inFile())) {
       return(NULL)
@@ -80,7 +84,15 @@ server <- function(input, output, clientData, session) {
       return(NULL)
     }
     
-    ggplot(getTable(), aes(x=input$infoColumn)) + geom_density()
+    plot(density(getTable()[, input$infoColumn]))
+  })
+  
+  output$histogramPlot <- renderPlot({
+    if (is.null(inFile())) {
+      return(NULL)
+    }
+    
+    hist(getTable()[, input$infoColumn], breaks=input$bins)
   })
   
   output$dendrogram <- renderPlot({
@@ -207,11 +219,16 @@ ui = tagList(
     ),
     tabPanel("Информация",
              sidebarPanel(
-               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE)
+               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE),
+               numericInput("bins", "Количество разбиений гистограммы", value=10)
              ),
              mainPanel(
                verbatimTextOutput("outInfoColumn"),
-               plotOutput("densityPlot")
+               h4("График плотности:"),
+               plotOutput("densityPlot"),
+               tags$hr(),
+               h4("Гистограмма:"),
+               plotOutput("histogramPlot")
              )
     ),
     tabPanel("Матрицы",
