@@ -7,12 +7,47 @@ library(ggplot2)
 options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output, clientData, session) {
+  subsetCols <- c()
+  subsetRows <- c()
+  
   getTable <- reactive({
     df <- read.csv(input$datafile$datapath, header = input$header,
              sep = input$sep, quote = input$quote)
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
+    df
+  })
+  
+  getSubTable <- reactive({
+    df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols())]
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
+  })
+  
+  getSubsetCols <- reactive({
+    if(input$subsetCols == "") {
+      return(colnames(getTable()))
+    }
+    
+    lapply(strsplit(input$subsetCols, ",")[[1]], function(x) {
+      ifelse(grepl("-", x), 
+             {
+               l <- strsplit(x, "-")
+               list(as.integer(l[[1]][[1]]):as.integer(l[[1]][[2]]))
+             }, as.integer(x))
+      })
+  })
+  
+  getSubsetRows <- reactive({
+    if(input$subsetRows == "") {
+      return(rownames(getTable()))
+    }
+    lapply(strsplit(input$subsetRows, ",")[[1]], function(x) {
+      ifelse(grepl("-", x), 
+             {
+               l <- strsplit(x, "-")
+               list(as.integer(l[[1]][[1]]):as.integer(l[[1]][[2]]))
+             }, as.integer(x))
+    })
   })
   
   output$maintable <- DT::renderDataTable({
@@ -74,12 +109,11 @@ server <- function(input, output, clientData, session) {
     if (is.null(inFile)) {
       return(NULL)
     }
-    DT::datatable(getTable(),
+    DT::datatable(getSubTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
                                searching=FALSE,
-                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json'),
-                               order = lapply(input$sortColumns, function(x) list(which(colnames(getTable()) == x), 'asc'))
+                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
                   ))
   })
 }
@@ -129,8 +163,9 @@ ui = tagList(
              sidebarPanel(
                textInput("subsetCols", "Столбцы подбазы:"),
                textInput("subsetRows", "Строки подбазы:"),
+               textInput("n", "N"),
                tags$hr(),
-               downloadButton('downloadData', 'Download')
+               downloadButton('downloadData', 'Скачать')
              ),
              mainPanel(
                DT::dataTableOutput('subtable')
