@@ -16,12 +16,14 @@ server <- function(input, output, clientData, session) {
     df <- read.csv(inFile()$datapath, header = input$header,
              sep = input$sep, quote = input$quote)
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
+    updateSelectInput(session, "infoColumn", choices=colnames(df))
+    updateTextInput(session, "subsetCols", "")
+    updateTextInput(session, "subsetRows", "")
     df
   })
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols())]
-    updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
   })
   
