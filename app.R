@@ -1,6 +1,6 @@
 library(shiny)
 library(shinythemes)
-library(ggplot2)
+library(plotly)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
@@ -81,20 +81,17 @@ server <- function(input, output, clientData, session) {
     sprintf("Среднее: %f, стандартное отклонение: %f", mean(arr), sd(arr))
     })
   
-  output$densityPlot <- renderPlot({
+  output$densityPlot <- renderPlotly({
     if (is.null(inFile())) {
       return(NULL)
     }
     
-    plot(density(getTable()[, input$infoColumn]))
-  })
-  
-  output$histogramPlot <- renderPlot({
-    if (is.null(inFile())) {
-      return(NULL)
-    }
+    x <- getTable()[, input$infoColumn]
+    fit <- density(x)
     
-    hist(getTable()[, input$infoColumn], breaks=input$bins)
+    plot_ly(x = x, type = "histogram", name = "Гистрограмма") %>% 
+      add_trace(x = fit$x, y = fit$y, type = "scatter", mode = "lines", fill = "tozeroy", yaxis = "y2", name = "Плотность") %>% 
+      layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
   output$dendrogram <- renderPlot({
@@ -227,10 +224,7 @@ ui = tagList(
              mainPanel(
                verbatimTextOutput("outInfoColumn"),
                h4("График плотности:"),
-               plotOutput("densityPlot"),
-               tags$hr(),
-               h4("Гистограмма:"),
-               plotOutput("histogramPlot")
+               plotlyOutput("densityPlot")
              )
     ),
     tabPanel("Матрицы",
@@ -257,6 +251,10 @@ ui = tagList(
                h4("Дендрограмма:"),
                plotOutput("dendrogram")
              )
+    ),
+    tabPanel("Анализ главных компонент",
+             sidebarPanel(),
+             mainPanel()
     )
   )
 )
