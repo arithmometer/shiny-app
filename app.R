@@ -25,13 +25,34 @@ server <- function(input, output, clientData, session) {
   })
   
   getSubTable <- reactive({
-    df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols())]
+    df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
   })
   
+  validateRange <- function(s) {
+    if(is.null(s)) {
+      return(TRUE)
+    }
+    s <- gsub(" ", "", s, fixed = TRUE)
+    if(s == "") {
+      return(TRUE)
+    }
+    all(sapply(strsplit(s, ",")[[1]], function(x) {
+      ifelse(grepl("-", x), 
+             {
+               l <- strsplit(x, "-")[[1]]
+               if(length(l) > 2) {
+                 return(FALSE)
+               }
+               !is.na(as.integer(l[1])) && !is.na(as.integer(l[2]))
+             }, !is.na(as.integer(x)))
+    }))
+  }
+  
   getSubsetCols <- reactive({
+    validate(need(validateRange(input$subsetCols), "Столбцы выбраны неправильно"))
     s <- gsub(" ", "", input$subsetCols, fixed = TRUE)
     if(s == "") {
       return(colnames(getTable()))
@@ -47,6 +68,7 @@ server <- function(input, output, clientData, session) {
   })
   
   getSubsetRows <- reactive({
+    validate(need(validateRange(input$subsetRows), "Строки выбраны неправильно"))
     s <- gsub(" ", "", input$subsetRows, fixed = TRUE)
     if(s == "") {
       return(rownames(getTable()))
