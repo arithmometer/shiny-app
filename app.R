@@ -1,6 +1,8 @@
 library(shiny)
 library(shinythemes)
 library(plotly)
+library(ggplot2)
+library(ggdendro)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
@@ -14,7 +16,7 @@ server <- function(input, output, clientData, session) {
   
   getTable <- reactive({
     df <- read.csv(inFile()$datapath, header = input$header,
-             sep = input$sep, quote = input$quote)
+             sep = input$sep)
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     updateTextInput(session, "subsetCols", "")
@@ -24,6 +26,8 @@ server <- function(input, output, clientData, session) {
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols())]
+    updateSelectizeInput(session, "sortColumns", choices=colnames(df))
+    updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
   })
   
@@ -69,15 +73,11 @@ server <- function(input, output, clientData, session) {
                   ))
   })
   
-  output$debug <- reactive({
-    input$infoColumn
-  })
-  
-  output$outInfoColumn <- renderPrint({
+  output$outInfoColumn <- renderText({
     if (is.null(inFile())) {
       return(NULL)
     }
-    arr <- getTable()[, input$infoColumn]
+    arr <- getSubTable()[, input$infoColumn]
     sprintf("Среднее: %f, стандартное отклонение: %f", mean(arr), sd(arr))
     })
   
@@ -86,17 +86,40 @@ server <- function(input, output, clientData, session) {
       return(NULL)
     }
     
-    x <- getTable()[, input$infoColumn]
+    validate(
+      need(as.numeric(getSubTable()[, input$infoColumn]), "Выберите числовой столбец")
+    )
+    
+    x <- getSubTable()[, input$infoColumn]
     fit <- density(x)
     
-    plot_ly(x = x, type = "histogram", name = "Гистрограмма") %>% 
+    plot_ly(x = x, type = "histogram", name = "Гистограмма") %>% 
       add_trace(x = fit$x, y = fit$y, type = "scatter", mode = "lines", fill = "tozeroy", yaxis = "y2", name = "Плотность") %>% 
       layout(yaxis2 = list(overlaying = "y", side = "right"))
   })
   
   output$dendrogram <- renderPlot({
-    hc <- hclust(dist(getSubTable()), method=input$clusteringMethod)
-    plot(hc)
+    dd <- as.dendrogram(getHC())
+    df <- dendro_data(dd)
+    ggdendrogram(df)
+  })
+  
+  getHC <- reactive({
+    hclust(dist(getSubTable()), method=input$clusteringMethod)
+  })
+  
+  output$pca <- renderPlotly({
+    pca <- princomp(getSubTable(), cor = TRUE)
+    hc <- getHC()
+    clusters <- cutree(hc, k = input$numClusters)
+    df <- data.frame(pca$scores, "cluster" = factor(clusters))
+    df <- transform(df, cluster_name = paste("Cluster", clusters))
+    plot_ly(df, x = ~Comp.1, y = ~Comp.2, z = ~Comp.3, type = "scatter3d", mode = "markers",
+            color = ~cluster_name, marker = list(symbol = 'circle', size = 4)) %>%
+      layout(title="Анализ главных компонент",
+             scene = list(xaxis = list(title="PC1"),
+                          yaxis = list(title="PC2"),
+                          zaxis = list(title="PC3")))
   })
   
   getCorrMatrix <- reactive({
@@ -108,10 +131,16 @@ server <- function(input, output, clientData, session) {
   })
   
   output$corrMatrix <- renderTable({
+    validate(
+      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+    )
     getCorrMatrix()
   })
   
   output$covMatrix <- renderTable({
+    validate(
+      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+    )
     getCovMatrix()
   })
   
@@ -156,6 +185,7 @@ server <- function(input, output, clientData, session) {
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
                                searching=FALSE,
+                               ordering=FALSE,
                                language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
                   ))
   })
@@ -183,11 +213,6 @@ ui = tagList(
                               'Точка с запятой'=';',
                               'Табуляция'='\t'),
                             ','),
-               #               radioButtons('quote', 'Кавычки',
-               #                            c('Отсутствуют'='',
-               #                              'Двойные кавычки'='"',
-               #                              'Одинарные кавычки'="'"),
-               #                            '"'),
                tags$hr(),
                selectizeInput(
                  'sortColumns', 'Сортировать по', choices = NULL, multiple = TRUE
@@ -206,9 +231,10 @@ ui = tagList(
              sidebarPanel(
                p("Номера строк и столбцов следует указывать через запятую, ",
                  "интервалы можно указывать через тире. Например: 1,2,3-10,15-17,20"),
-               textInput("subsetCols", "Столбцы подбазы:"),
-               textInput("subsetRows", "Строки подбазы:"),
-               # textInput("n", "N"),
+               h5("Столбцы подбазы"),
+               textInput("subsetCols", label=""),
+               h5("Строки подбазы"),
+               textInput("subsetRows", label=""),
                tags$hr(),
                downloadButton('downloadData', 'Скачать csv')
              ),
@@ -218,8 +244,7 @@ ui = tagList(
     ),
     tabPanel("Информация",
              sidebarPanel(
-               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE),
-               numericInput("bins", "Количество разбиений гистограммы", value=10)
+               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE)
              ),
              mainPanel(
                verbatimTextOutput("outInfoColumn"),
@@ -228,7 +253,6 @@ ui = tagList(
              )
     ),
     tabPanel("Матрицы",
-             # sidebarPanel(),
              mainPanel(
                h4("Матрица корреляции:"),
                tableOutput("corrMatrix"),
@@ -242,19 +266,20 @@ ui = tagList(
     tabPanel("Кластеризация",
              sidebarPanel(
                radioButtons("clusteringMethod", "Метод кластеризации", 
-                            choices=c("полной связи"="complete",
-                                      "одиночной связи"="single",
-                                      "средней связи"="average"
-                                      ))
+                            choices=c("одиночной связи"="single",
+                                      "средней связи"="average",
+                                      "полной связи"="complete"
+                                      ),
+                            selected = c("single")),
+               numericInput("numClusters", "Количество кластеров", value = 3, min = 1)
              ),
              mainPanel(
                h4("Дендрограмма:"),
-               plotOutput("dendrogram")
+               plotOutput("dendrogram"),
+               tags$hr(),
+               h4("Анализ главных компонент:"),
+               plotlyOutput("pca")
              )
-    ),
-    tabPanel("Анализ главных компонент",
-             sidebarPanel(),
-             mainPanel()
     )
   )
 )
