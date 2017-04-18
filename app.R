@@ -19,6 +19,7 @@ server <- function(input, output, clientData, session) {
              sep = input$sep)
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     updateSelectInput(session, "infoColumn", choices=colnames(df))
+    updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
     updateTextInput(session, "subsetCols", "")
     updateTextInput(session, "subsetRows", "")
     df
@@ -29,6 +30,16 @@ server <- function(input, output, clientData, session) {
     updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
+  })
+  
+  getSubTableRowNames <- reactive({
+    if(input$elementNames == "№") {
+      rownames(getTable()[unlist(getSubsetRows()), ,])
+    } else {
+      res <- getTable()[unlist(getSubsetRows()), c(input$elementNames)]
+      write.csv(str(res), 'debug.csv')
+      return(res)
+    }
   })
   
   validateRange <- function(s) {
@@ -126,14 +137,26 @@ server <- function(input, output, clientData, session) {
     ggdendrogram(df)
   })
   
+  getDist <- reactive({
+    dist(getSubTable())
+  })
+  
   getHC <- reactive({
-    hclust(dist(getSubTable()), method=input$clusteringMethod)
+    hclust(getDist(), method=input$clusteringMethod)
+  })
+  
+  getClusters <- reactive({
+    hc <- getHC()
+    clusters <- cutree(hc, k = input$numClusters)
+    clusters
   })
   
   output$pca <- renderPlotly({
+    validate(
+      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+    )
     pca <- princomp(getSubTable(), cor = TRUE)
-    hc <- getHC()
-    clusters <- cutree(hc, k = input$numClusters)
+    clusters <- getClusters()
     df <- data.frame(pca$scores, "cluster" = factor(clusters))
     df <- transform(df, cluster_name = paste("Cluster", clusters))
     plot_ly(df, x = ~Comp.1, y = ~Comp.2, z = ~Comp.3, type = "scatter3d", mode = "markers",
@@ -142,6 +165,32 @@ server <- function(input, output, clientData, session) {
              scene = list(xaxis = list(title="PC1"),
                           yaxis = list(title="PC2"),
                           zaxis = list(title="PC3")))
+  })
+  
+  output$graph <- renderPlotly({
+    g <- graph.empty(input$numClusters, directed = FALSE)
+    L <- layout.circle(g)
+    clusters <- getClusters()
+    counts <- as.vector(table(clusters))
+    total <- sum(counts)
+    sizes <- c(counts / total) * 100 + 70
+    labels <- sapply(1:input$numClusters, function(x) {
+      long.string <- paste(getSubTableRowNames()[clusters == x], collapse=", ")
+      paste(strwrap(long.string, width = 70), collapse="<br>")
+    })
+    network <- plot_ly(x = ~L[,1], y = ~L[,2], mode = "markers", type = "scatter", 
+                       text = labels, hoverinfo = "text",
+                       symbol = 'circle',
+                       marker = list(size = sizes),
+                       color = 1:input$numClusters, colors = "Set1")
+    axis <- list(title = "", showgrid = FALSE, showticklabels = FALSE, zeroline = FALSE)
+    p <- layout(
+      network,
+      shapes = edge_shapes,
+      xaxis = axis,
+      yaxis = axis
+    )
+    p
   })
   
   getCorrMatrix <- reactive({
@@ -166,36 +215,31 @@ server <- function(input, output, clientData, session) {
     getCovMatrix()
   })
   
-  # downloadHandler() takes two arguments, both functions.
-  # The content function is passed a filename as an argument, and
-  #   it should write out data to that filename.
   output$downloadData <- downloadHandler(
-    # This function returns a string which tells the client
-    # browser what name to use when saving the file.
     filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv", sep = ""),
-    
-    # This function should write data to a file given to it by
-    # the argument 'file'.
     content = function(file) {
-      # Write to a file specified by the 'file' argument
-      write.table(getSubTable(), file, sep=",",
-                  row.names = FALSE)
+      write.table(getSubTable(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadCorr <- downloadHandler(
     filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_corr", ".csv", sep = ""),
     content = function(file) {
-      write.table(getCorrMatrix(), file, sep=",",
-                  row.names = FALSE)
+      write.table(getCorrMatrix(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadCov <- downloadHandler(
     filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_cov", ".csv", sep = ""),
     content = function(file) {
-      write.table(getCovMatrix(), file, sep=",",
-                  row.names = FALSE)
+      write.table(getCovMatrix(), file, sep=",", row.names = FALSE)
+    }
+  )
+  
+  output$downloadDist <- downloadHandler(
+    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_adjacency", ".csv", sep = ""),
+    content = function(file) {
+      write.table(as.matrix(getDist()), file, sep=",", row.names = FALSE)
     }
   )
   
@@ -236,10 +280,6 @@ ui = tagList(
                               'Табуляция'='\t'),
                             ','),
                tags$hr(),
-               selectizeInput(
-                 'sortColumns', 'Сортировать по', choices = NULL, multiple = TRUE
-               ),
-               tags$hr(),
                p('Для тестирования можете загрузить примеры файлов .csv or .tsv:',
                  a(href = 'mtcars.csv', 'mtcars.csv'), 'или',
                  a(href = 'pressure.tsv', 'pressure.tsv')
@@ -257,6 +297,10 @@ ui = tagList(
                textInput("subsetCols", label=""),
                h5("Строки подбазы"),
                textInput("subsetRows", label=""),
+               tags$hr(),
+               selectizeInput(
+                 'sortColumns', 'Сортировать по', choices = NULL, multiple = TRUE
+               ),
                tags$hr(),
                downloadButton('downloadData', 'Скачать csv')
              ),
@@ -293,14 +337,22 @@ ui = tagList(
                                       "полной связи"="complete"
                                       ),
                             selected = c("single")),
-               numericInput("numClusters", "Количество кластеров", value = 3, min = 1)
+               numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
+               tags$hr(),
+               selectizeInput(
+                 'elementNames', 'Использовать в качестве названия', choices = NULL, multiple = FALSE
+               ),
+               tags$hr(),
+               downloadButton('downloadDist', 'Скачать матрицу смежности')
              ),
              mainPanel(
                h4("Дендрограмма:"),
                plotOutput("dendrogram"),
                tags$hr(),
                h4("Анализ главных компонент:"),
-               plotlyOutput("pca")
+               plotlyOutput("pca"),
+               h4("Кластеры"),
+               plotlyOutput("graph")
              )
     )
   )
