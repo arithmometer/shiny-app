@@ -3,12 +3,15 @@ library(shinythemes)
 library(plotly)
 library(ggplot2)
 library(ggdendro)
+library(igraph)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
 options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output, clientData, session) {
+  values <- reactiveValues()
+  
   inFile <- reactive(input$datafile)
   
   subsetCols <- c()
@@ -17,7 +20,7 @@ server <- function(input, output, clientData, session) {
   getTable <- reactive({
     df <- read.csv(inFile()$datapath, header = input$header,
              sep = input$sep)
-    updateSelectizeInput(session, "sortColumns", choices=colnames(df))
+    values$colnames <- colnames(df)
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
     updateTextInput(session, "subsetCols", "")
@@ -27,7 +30,6 @@ server <- function(input, output, clientData, session) {
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
-    updateSelectizeInput(session, "sortColumns", choices=colnames(df))
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
   })
@@ -101,8 +103,7 @@ server <- function(input, output, clientData, session) {
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
                                searching=FALSE,
-                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json'),
-                               order = lapply(input$sortColumns, function(x) list(which(colnames(getTable()) == x), 'asc'))
+                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
                   ))
   })
   
@@ -186,7 +187,6 @@ server <- function(input, output, clientData, session) {
     axis <- list(title = "", showgrid = FALSE, showticklabels = FALSE, zeroline = FALSE)
     p <- layout(
       network,
-      shapes = edge_shapes,
       xaxis = axis,
       yaxis = axis
     )
@@ -255,6 +255,97 @@ server <- function(input, output, clientData, session) {
                                language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
                   ))
   })
+  
+  values$n <- 0
+  values$m <- 0
+  values$num.filters <- c()
+  values$num.sorts <- c()
+  
+  observeEvent(input$addFilter, {
+    values$n <- values$n + 1
+    n <- values$n
+    values[[paste("selected_col", n, sep="")]] <- 1
+    values[[paste("selected_op", n, sep="")]] <- "="
+    values[[paste("selected_val", n, sep="")]] <- ""
+    
+    values$num.filters <- c(values$num.filters, n)
+    output[[paste("col", n, sep="")]] <- renderUI({
+      selectizeInput(paste("col", n, sep=""), "", choices = values$colnames, 
+                     selected = values[[paste("selected_col", n, sep="")]])
+    })
+    output[[paste("op", n, sep="")]] <- renderUI({
+      selectizeInput(paste("op", n, sep=""), "", multiple = F, choices = list("=", "<", ">"), 
+                     selected = values[[paste("selected_op", n, sep="")]])
+    })
+    output[[paste("val", n, sep="")]] <- renderUI({
+      textInput(paste("val", n, sep=""), "", value = values[[paste("selected_val", n, sep="")]])
+    })
+    output[[paste("remove", n, sep="")]] <- renderUI({
+      actionButton(paste("remove", n, sep=""), "x")
+    })
+    
+    observeEvent(input[[paste("remove", n, sep="")]], {
+      values$num.filters <- values$num.filters[-which(values$num.filters == n)]
+    })
+    observe({
+      values[[paste("selected_col", n, sep="")]] <- input[[paste("col", n, sep="")]]
+      values[[paste("selected_op", n, sep="")]] <- input[[paste("op", n, sep="")]]
+      values[[paste("selected_val", n, sep="")]] <- input[[paste("val", n, sep="")]]
+    })
+  })
+  
+  output$filter <- renderUI({
+    if(length(values$num.filters) > 0) {
+      lapply(values$num.filters, function(i) {
+        fluidRow(
+          column(4, uiOutput(paste("col", i, sep=""))),
+          column(3, uiOutput(paste("op", i, sep=""))),
+          column(3, uiOutput(paste("val", i, sep=""))),
+          column(2, uiOutput(paste("remove", i, sep="")))
+        )
+      })
+    }
+  })
+  
+  observeEvent(input$addSort, {
+    values$m <- values$m + 1
+    m <- values$m
+    values[[paste("selected_sortcol", m, sep="")]] <- 1
+    values[[paste("selected_asc", m, sep="")]] <- "по возрастанию"
+    
+    values$num.sorts <- c(values$num.sorts, m)
+    output[[paste("sortcol", m, sep="")]] <- renderUI({
+      selectizeInput(paste("sortcol", m, sep=""), "", choices = values$colnames, 
+                     selected = values[[paste("selected_sortcol", m, sep="")]])
+    })
+    output[[paste("asc", m, sep="")]] <- renderUI({
+      selectizeInput(paste("asc", m, sep=""), "", multiple = F, choices = list("по возрастанию", "по убыванию"), 
+                     selected = values[[paste("selected_asc", m, sep="")]])
+    })
+    output[[paste("removesort", m, sep="")]] <- renderUI({
+      actionButton(paste("removesort", m, sep=""), "x")
+    })
+    
+    observeEvent(input[[paste("removesort", m, sep="")]], {
+      values$num.sorts <- values$num.sorts[-which(values$num.sorts == m)]
+    })
+    observe({
+      values[[paste("selected_sortcol", m, sep="")]] <- input[[paste("sortcol", m, sep="")]]
+      values[[paste("selected_asc", m, sep="")]] <- input[[paste("asc", m, sep="")]]
+    })
+  })
+  
+  output$sort <- renderUI({
+    if(length(values$num.sorts) > 0) {
+      lapply(values$num.sorts, function(i) {
+        fluidRow(
+          column(5, uiOutput(paste("sortcol", i, sep=""))),
+          column(5, uiOutput(paste("asc", i, sep=""))),
+          column(2, uiOutput(paste("removesort", i, sep="")))
+        )
+      })
+    }
+  })
 }
 
 ui = tagList(
@@ -298,9 +389,11 @@ ui = tagList(
                h5("Строки подбазы"),
                textInput("subsetRows", label=""),
                tags$hr(),
-               selectizeInput(
-                 'sortColumns', 'Сортировать по', choices = NULL, multiple = TRUE
-               ),
+               uiOutput("filter"),
+               actionButton("addFilter", "Добавить фильтр"),
+               tags$hr(),
+               uiOutput("sort"),
+               actionButton("addSort", "Добавить сортировку"),
                tags$hr(),
                downloadButton('downloadData', 'Скачать csv')
              ),
