@@ -17,6 +17,11 @@ server <- function(input, output, clientData, session) {
   subsetCols <- c()
   subsetRows <- c()
   
+  values$n <- 0
+  values$m <- 0
+  values$num.filters <- c()
+  values$num.sorts <- c()
+  
   getTable <- reactive({
     df <- read.csv(inFile()$datapath, header = input$header,
              sep = input$sep)
@@ -30,6 +35,23 @@ server <- function(input, output, clientData, session) {
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
+    for(i in values$num.filters) {
+      if(!is.null(input[[paste0("val", i)]]) && input[[paste0("val", i)]] != "") {
+        df <- switch(input[[paste0("op", i)]],
+                     "=" = df[df[, input[[paste0("col", i)]]] == input[[paste0("val", i)]],],
+                     "<" = df[df[, input[[paste0("col", i)]]] < input[[paste0("val", i)]],],
+                     ">" = df[df[, input[[paste0("col", i)]]] > input[[paste0("val", i)]],]
+          )
+      }
+    }
+    for(i in values$num.sorts) {
+      if(!is.null(input[[paste0("sortcol", i)]])) {
+        df <- switch(input[[paste0("asc", i)]],
+                     "по возрастанию" = df[order(df[[paste0(input[[paste0("sortcol", i)]])]]), ],
+                     "по убыванию" = df[order(-df[[paste0(input[[paste0("sortcol", i)]])]]), ]
+        )
+      }
+    }
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     df
   })
@@ -216,28 +238,28 @@ server <- function(input, output, clientData, session) {
   })
   
   output$downloadData <- downloadHandler(
-    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv", sep = ""),
+    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv"),
     content = function(file) {
       write.table(getSubTable(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadCorr <- downloadHandler(
-    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_corr", ".csv", sep = ""),
+    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_corr", ".csv"),
     content = function(file) {
       write.table(getCorrMatrix(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadCov <- downloadHandler(
-    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_cov", ".csv", sep = ""),
+    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_cov", ".csv"),
     content = function(file) {
       write.table(getCovMatrix(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadDist <- downloadHandler(
-    filename = paste(substr(inFile(), 1, nchar(inFile())-4), "_adjacency", ".csv", sep = ""),
+    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_adjacency", ".csv"),
     content = function(file) {
       write.table(as.matrix(getDist()), file, sep=",", row.names = FALSE)
     }
@@ -256,41 +278,36 @@ server <- function(input, output, clientData, session) {
                   ))
   })
   
-  values$n <- 0
-  values$m <- 0
-  values$num.filters <- c()
-  values$num.sorts <- c()
-  
   observeEvent(input$addFilter, {
     values$n <- values$n + 1
     n <- values$n
-    values[[paste("selected_col", n, sep="")]] <- 1
-    values[[paste("selected_op", n, sep="")]] <- "="
-    values[[paste("selected_val", n, sep="")]] <- ""
+    values[[paste0("selected_col", n)]] <- 1
+    values[[paste0("selected_op", n)]] <- "="
+    values[[paste0("selected_val", n)]] <- ""
     
     values$num.filters <- c(values$num.filters, n)
-    output[[paste("col", n, sep="")]] <- renderUI({
-      selectizeInput(paste("col", n, sep=""), "", choices = values$colnames, 
-                     selected = values[[paste("selected_col", n, sep="")]])
+    output[[paste0("col", n)]] <- renderUI({
+      selectizeInput(paste0("col", n), "", choices = values$colnames, 
+                     selected = values[[paste0("selected_col", n)]])
     })
-    output[[paste("op", n, sep="")]] <- renderUI({
-      selectizeInput(paste("op", n, sep=""), "", multiple = F, choices = list("=", "<", ">"), 
-                     selected = values[[paste("selected_op", n, sep="")]])
+    output[[paste0("op", n)]] <- renderUI({
+      selectizeInput(paste0("op", n), "", multiple = F, choices = list("=", "<", ">"), 
+                     selected = values[[paste0("selected_op", n)]])
     })
-    output[[paste("val", n, sep="")]] <- renderUI({
-      textInput(paste("val", n, sep=""), "", value = values[[paste("selected_val", n, sep="")]])
+    output[[paste0("val", n)]] <- renderUI({
+      textInput(paste0("val", n), "", value = values[[paste0("selected_val", n)]])
     })
-    output[[paste("remove", n, sep="")]] <- renderUI({
-      actionButton(paste("remove", n, sep=""), "x")
+    output[[paste0("remove", n)]] <- renderUI({
+      actionButton(paste0("remove", n), "x")
     })
     
-    observeEvent(input[[paste("remove", n, sep="")]], {
+    observeEvent(input[[paste0("remove", n)]], {
       values$num.filters <- values$num.filters[-which(values$num.filters == n)]
     })
     observe({
-      values[[paste("selected_col", n, sep="")]] <- input[[paste("col", n, sep="")]]
-      values[[paste("selected_op", n, sep="")]] <- input[[paste("op", n, sep="")]]
-      values[[paste("selected_val", n, sep="")]] <- input[[paste("val", n, sep="")]]
+      values[[paste0("selected_col", n)]] <- input[[paste0("col", n)]]
+      values[[paste0("selected_op", n)]] <- input[[paste0("op", n)]]
+      values[[paste0("selected_val", n)]] <- input[[paste0("val", n)]]
     })
   })
   
@@ -298,10 +315,10 @@ server <- function(input, output, clientData, session) {
     if(length(values$num.filters) > 0) {
       lapply(values$num.filters, function(i) {
         fluidRow(
-          column(4, uiOutput(paste("col", i, sep=""))),
-          column(3, uiOutput(paste("op", i, sep=""))),
-          column(3, uiOutput(paste("val", i, sep=""))),
-          column(2, uiOutput(paste("remove", i, sep="")))
+          column(4, uiOutput(paste0("col", i))),
+          column(3, uiOutput(paste0("op", i))),
+          column(3, uiOutput(paste0("val", i))),
+          column(2, uiOutput(paste0("remove", i)))
         )
       })
     }
@@ -310,28 +327,28 @@ server <- function(input, output, clientData, session) {
   observeEvent(input$addSort, {
     values$m <- values$m + 1
     m <- values$m
-    values[[paste("selected_sortcol", m, sep="")]] <- 1
-    values[[paste("selected_asc", m, sep="")]] <- "по возрастанию"
+    values[[paste0("selected_sortcol", m)]] <- 1
+    values[[paste0("selected_asc", m)]] <- "по возрастанию"
     
     values$num.sorts <- c(values$num.sorts, m)
-    output[[paste("sortcol", m, sep="")]] <- renderUI({
-      selectizeInput(paste("sortcol", m, sep=""), "", choices = values$colnames, 
-                     selected = values[[paste("selected_sortcol", m, sep="")]])
+    output[[paste0("sortcol", m)]] <- renderUI({
+      selectizeInput(paste0("sortcol", m), "", choices = values$colnames, 
+                     selected = values[[paste0("selected_sortcol", m)]])
     })
-    output[[paste("asc", m, sep="")]] <- renderUI({
-      selectizeInput(paste("asc", m, sep=""), "", multiple = F, choices = list("по возрастанию", "по убыванию"), 
-                     selected = values[[paste("selected_asc", m, sep="")]])
+    output[[paste0("asc", m)]] <- renderUI({
+      selectizeInput(paste0("asc", m), "", multiple = F, choices = list("по возрастанию", "по убыванию"), 
+                     selected = values[[paste0("selected_asc", m)]])
     })
-    output[[paste("removesort", m, sep="")]] <- renderUI({
-      actionButton(paste("removesort", m, sep=""), "x")
+    output[[paste0("removesort", m)]] <- renderUI({
+      actionButton(paste0("removesort", m), "x")
     })
     
-    observeEvent(input[[paste("removesort", m, sep="")]], {
+    observeEvent(input[[paste0("removesort", m)]], {
       values$num.sorts <- values$num.sorts[-which(values$num.sorts == m)]
     })
     observe({
-      values[[paste("selected_sortcol", m, sep="")]] <- input[[paste("sortcol", m, sep="")]]
-      values[[paste("selected_asc", m, sep="")]] <- input[[paste("asc", m, sep="")]]
+      values[[paste0("selected_sortcol", m, sep="")]] <- input[[paste0("sortcol", m)]]
+      values[[paste0("selected_asc", m, sep="")]] <- input[[paste0("asc", m)]]
     })
   })
   
@@ -339,9 +356,9 @@ server <- function(input, output, clientData, session) {
     if(length(values$num.sorts) > 0) {
       lapply(values$num.sorts, function(i) {
         fluidRow(
-          column(5, uiOutput(paste("sortcol", i, sep=""))),
-          column(5, uiOutput(paste("asc", i, sep=""))),
-          column(2, uiOutput(paste("removesort", i, sep="")))
+          column(5, uiOutput(paste0("sortcol", i))),
+          column(5, uiOutput(paste0("asc", i))),
+          column(2, uiOutput(paste0("removesort", i)))
         )
       })
     }
