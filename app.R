@@ -16,6 +16,8 @@ server <- function(input, output, clientData, session) {
   
   subsetCols <- c()
   subsetRows <- c()
+  subsetColsFiltered <- c()
+  subsetRowsFiltered <- c()
   
   values$n <- 0
   values$m <- 0
@@ -23,18 +25,20 @@ server <- function(input, output, clientData, session) {
   values$num.sorts <- c()
   
   getTable <- reactive({
-    df <- read.csv(inFile()$datapath, header = input$header,
-             sep = input$sep)
+    df <- read.csv(inFile()$datapath, header = input$header, sep = input$sep)
     values$colnames <- colnames(df)
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
     updateTextInput(session, "subsetCols", "")
     updateTextInput(session, "subsetRows", "")
+    updateTextInput(session, "subsetColsFiltered", "")
+    updateTextInput(session, "subsetRowsFiltered", "")
     df
   })
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
+    # df <- df[unlist(getSubsetRowsFiltered()), unlist(getSubsetColsFiltered()), drop=FALSE]
     for(i in values$num.filters) {
       if(!is.null(input[[paste0("val", i)]]) && input[[paste0("val", i)]] != "") {
         df <- switch(input[[paste0("op", i)]],
@@ -56,12 +60,15 @@ server <- function(input, output, clientData, session) {
     df
   })
   
+  getFilteredSubTable <- reactive({
+    getSubTable()[unlist(getSubsetRowsFiltered()), unlist(getSubsetColsFiltered()), drop=FALSE]
+  })
+  
   getSubTableRowNames <- reactive({
     if(input$elementNames == "№") {
       rownames(getTable()[unlist(getSubsetRows()), ,])
     } else {
       res <- getTable()[unlist(getSubsetRows()), c(input$elementNames)]
-      write.csv(str(res), 'debug.csv')
       return(res)
     }
   })
@@ -117,6 +124,37 @@ server <- function(input, output, clientData, session) {
     })
   })
   
+  getSubsetColsFiltered <- reactive({
+    validate(need(validateRange(input$subsetColsFiltered), "Столбцы выбраны неправильно"))
+    s <- gsub(" ", "", input$subsetColsFiltered, fixed = TRUE)
+    if(s == "") {
+      return(colnames(getSubTable()))
+    }
+    
+    lapply(strsplit(s, ",")[[1]], function(x) {
+      ifelse(grepl("-", x), 
+             {
+               l <- strsplit(x, "-")
+               list(as.integer(l[[1]][[1]]):as.integer(l[[1]][[2]]))
+             }, as.integer(x))
+    })
+  })
+  
+  getSubsetRowsFiltered <- reactive({
+    validate(need(validateRange(input$subsetRowsFiltered), "Строки выбраны неправильно"))
+    s <- gsub(" ", "", input$subsetRowsFiltered, fixed = TRUE)
+    if(s == "") {
+      return(rownames(getSubTable()))
+    }
+    lapply(strsplit(s, ",")[[1]], function(x) {
+      ifelse(grepl("-", x), 
+             {
+               l <- strsplit(x, "-")
+               list(as.integer(l[[1]][[1]]):as.integer(l[[1]][[2]]))
+             }, as.integer(x))
+    })
+  })
+  
   output$maintable <- DT::renderDataTable({
     if (is.null(inFile())) {
       return(NULL)
@@ -133,7 +171,7 @@ server <- function(input, output, clientData, session) {
     if (is.null(inFile())) {
       return(NULL)
     }
-    arr <- getSubTable()[, input$infoColumn]
+    arr <- getFilteredSubTable()[, input$infoColumn]
     sprintf("Среднее: %f, стандартное отклонение: %f", mean(arr), sd(arr))
     })
   
@@ -143,10 +181,10 @@ server <- function(input, output, clientData, session) {
     }
     
     validate(
-      need(as.numeric(getSubTable()[, input$infoColumn]), "Выберите числовой столбец")
+      need(as.numeric(getFilteredSubTable()[, input$infoColumn]), "Выберите числовой столбец")
     )
     
-    x <- getSubTable()[, input$infoColumn]
+    x <- getFilteredSubTable()[, input$infoColumn]
     fit <- density(x)
     
     plot_ly(x = x, type = "histogram", name = "Гистограмма") %>% 
@@ -161,7 +199,7 @@ server <- function(input, output, clientData, session) {
   })
   
   getDist <- reactive({
-    dist(getSubTable())
+    dist(getFilteredSubTable())
   })
   
   getHC <- reactive({
@@ -176,9 +214,9 @@ server <- function(input, output, clientData, session) {
   
   output$pca <- renderPlotly({
     validate(
-      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+      need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
     )
-    pca <- princomp(getSubTable(), cor = TRUE)
+    pca <- princomp(getFilteredSubTable(), cor = TRUE)
     clusters <- getClusters()
     df <- data.frame(pca$scores, "cluster" = factor(clusters))
     df <- transform(df, cluster_name = paste("Cluster", clusters))
@@ -216,23 +254,23 @@ server <- function(input, output, clientData, session) {
   })
   
   getCorrMatrix <- reactive({
-    cor(getSubTable())
+    cor(getFilteredSubTable())
   })
   
   getCovMatrix <- reactive({
-    cov(getSubTable())
+    cov(getFilteredSubTable())
   })
   
   output$corrMatrix <- renderTable({
     validate(
-      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+      need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
     )
     getCorrMatrix()
   })
   
   output$covMatrix <- renderTable({
     validate(
-      need(is.numeric(as.matrix(getSubTable())), "Матрица содержит нечисловой столбец")
+      need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
     )
     getCovMatrix()
   })
@@ -240,7 +278,7 @@ server <- function(input, output, clientData, session) {
   output$downloadData <- downloadHandler(
     filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv"),
     content = function(file) {
-      write.table(getSubTable(), file, sep=",", row.names = FALSE)
+      write.table(getFilteredSubTable(), file, sep=",", row.names = FALSE)
     }
   )
   
@@ -269,7 +307,7 @@ server <- function(input, output, clientData, session) {
     if (is.null(inFile())) {
       return(NULL)
     }
-    DT::datatable(getSubTable(),
+    DT::datatable(getFilteredSubTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
                                searching=FALSE,
@@ -394,7 +432,7 @@ ui = tagList(
                )
              ),
              mainPanel(
-               DT::dataTableOutput('maintable')
+               DT::dataTableOutput("maintable")
                )
     ),
     tabPanel("Подбаза",
@@ -412,7 +450,11 @@ ui = tagList(
                uiOutput("sort"),
                actionButton("addSort", "Добавить сортировку"),
                tags$hr(),
-               downloadButton('downloadData', 'Скачать csv')
+               h5("Столбцы подбазы после сортировки"),
+               textInput("subsetColsFiltered", label=""),
+               h5("Строки подбазы после сортировки"),
+               textInput("subsetRowsFiltered", label=""),
+               downloadButton("downloadData", "Скачать csv")
              ),
              mainPanel(
                DT::dataTableOutput("subtable")
@@ -432,11 +474,11 @@ ui = tagList(
              mainPanel(
                h4("Матрица корреляции:"),
                tableOutput("corrMatrix"),
-               downloadButton('downloadCorr', 'Скачать csv'),
+               downloadButton("downloadCorr", "Скачать csv"),
                tags$hr(),
                h4("Матрица ковариации:"),
                tableOutput("covMatrix"),
-               downloadButton('downloadCov', 'Скачать csv')
+               downloadButton("downloadCov", "Скачать csv")
              )
     ),
     tabPanel("Кластеризация",
@@ -450,10 +492,10 @@ ui = tagList(
                numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
                tags$hr(),
                selectizeInput(
-                 'elementNames', 'Использовать в качестве названия', choices = NULL, multiple = FALSE
+                 "elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE
                ),
                tags$hr(),
-               downloadButton('downloadDist', 'Скачать матрицу смежности')
+               downloadButton("downloadDist", "Скачать матрицу смежности")
              ),
              mainPanel(
                h4("Дендрограмма:"),
