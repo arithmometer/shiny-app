@@ -407,7 +407,18 @@ ui = tagList(
   navbarPage(
     theme = shinytheme("spacelab"),
     "Clustering",
-    tabPanel("Данные",
+    tabPanel("Генерация",
+             sidebarPanel(
+               numericInput("M", "M", 1, min=1, max=10),
+               numericInput("N", "N", 100, min=1, max=1000),
+               tags$hr()
+               # динамическое количество полей для видов распределений
+             ),
+             mainPanel(
+               
+             )
+    ),
+    tabPanel("Загрузка из файла",
              sidebarPanel(
                fileInput('datafile', 'Выбрать файл для загрузки',
                          accept = c(
