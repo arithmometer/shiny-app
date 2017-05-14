@@ -657,83 +657,83 @@ ui = tagList(
       mainPanel(
         DT::dataTableOutput("fulltable")
       )
-    ),
-    tabPanel("Таблица",
-             sidebarPanel(
-               p("Номера строк и столбцов следует указывать через запятую, ",
-                 "интервалы можно указывать через тире. Например: 1,2,3-10,15-17,20"),
-               h5("Столбцы подбазы"),
-               textInput("subsetCols", label=""),
-               h5("Строки подбазы"),
-               textInput("subsetRows", label=""),
-               tags$hr(),
-               actionButton("addFilter", "Добавить фильтр"),
-               tags$div(id = "filterPanel"),
-               tags$hr(),
-               actionButton("addSort", "Добавить сортировку"),
-               tags$div(id = "sortPanel"),
-               tags$hr(),
-               h5("Столбцы подбазы после фильтрации"),
-               textInput("subsetColsFiltered", label=""),
-               h5("Строки подбазы после фильтрации"),
-               textInput("subsetRowsFiltered", label=""),
-               downloadButton("downloadData", "Скачать csv", class="btn-success")
-             ),
-             mainPanel(
-               h2("Исходная таблица"),
-               DT::dataTableOutput("maintable"),
-               tags$hr(),
-               h2("Подбаза"),
-               DT::dataTableOutput("subtable")
-             )
-    ),
-    tabPanel("Информация",
-             sidebarPanel(
-               selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE)
-             ),
-             mainPanel(
-               verbatimTextOutput("outInfoColumn"),
-               h4("График плотности:"),
-               plotlyOutput("densityPlot")
-             )
-    ),
-    tabPanel("Матрицы",
-             mainPanel(
-               h4("Матрица корреляции:"),
-               tableOutput("corrMatrix"),
-               downloadButton("downloadCorr", "Скачать csv", class="btn-success"),
-               tags$hr(),
-               h4("Матрица ковариации:"),
-               tableOutput("covMatrix"),
-               downloadButton("downloadCov", "Скачать csv", class="btn-success")
-             )
-    ),
-    tabPanel("Кластеризация",
-             sidebarPanel(
-               radioButtons("clusteringMethod", "Метод кластеризации", 
-                            choices=c("одиночной связи"="single",
-                                      "средней связи"="average",
-                                      "полной связи"="complete"
-                                      ),
-                            selected = c("single")),
-               numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
-               tags$hr(),
-               selectizeInput(
-                 "elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE
-               ),
-               tags$hr(),
-               downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success")
-             ),
-             mainPanel(
-               h4("Дендрограмма:"),
-               plotOutput("dendrogram"),
-               tags$hr(),
-               h4("Анализ главных компонент:"),
-               plotlyOutput("pca"),
-               h4("Кластеры"),
-               plotlyOutput("graph")
-             )
     )
+    # tabPanel("Таблица",
+    #          sidebarPanel(
+    #            p("Номера строк и столбцов следует указывать через запятую, ",
+    #              "интервалы можно указывать через тире. Например: 1,2,3-10,15-17,20"),
+    #            h5("Столбцы подбазы"),
+    #            textInput("subsetCols", label=""),
+    #            h5("Строки подбазы"),
+    #            textInput("subsetRows", label=""),
+    #            tags$hr(),
+    #            actionButton("addFilter", "Добавить фильтр"),
+    #            tags$div(id = "filterPanel"),
+    #            tags$hr(),
+    #            actionButton("addSort", "Добавить сортировку"),
+    #            tags$div(id = "sortPanel"),
+    #            tags$hr(),
+    #            h5("Столбцы подбазы после фильтрации"),
+    #            textInput("subsetColsFiltered", label=""),
+    #            h5("Строки подбазы после фильтрации"),
+    #            textInput("subsetRowsFiltered", label=""),
+    #            downloadButton("downloadData", "Скачать csv", class="btn-success")
+    #          ),
+    #          mainPanel(
+    #            h2("Исходная таблица"),
+    #            DT::dataTableOutput("maintable"),
+    #            tags$hr(),
+    #            h2("Подбаза"),
+    #            DT::dataTableOutput("subtable")
+    #          )
+    # ),
+    # tabPanel("Информация",
+    #          sidebarPanel(
+    #            selectInput("infoColumn", "Выберите столбец", choices=NULL, selectize=TRUE)
+    #          ),
+    #          mainPanel(
+    #            verbatimTextOutput("outInfoColumn"),
+    #            h4("График плотности:"),
+    #            plotlyOutput("densityPlot")
+    #          )
+    # ),
+    # tabPanel("Матрицы",
+    #          mainPanel(
+    #            h4("Матрица корреляции:"),
+    #            tableOutput("corrMatrix"),
+    #            downloadButton("downloadCorr", "Скачать csv", class="btn-success"),
+    #            tags$hr(),
+    #            h4("Матрица ковариации:"),
+    #            tableOutput("covMatrix"),
+    #            downloadButton("downloadCov", "Скачать csv", class="btn-success")
+    #          )
+    # ),
+    # tabPanel("Кластеризация",
+    #          sidebarPanel(
+    #            radioButtons("clusteringMethod", "Метод кластеризации", 
+    #                         choices=c("одиночной связи"="single",
+    #                                   "средней связи"="average",
+    #                                   "полной связи"="complete"
+    #                                   ),
+    #                         selected = c("single")),
+    #            numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
+    #            tags$hr(),
+    #            selectizeInput(
+    #              "elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE
+    #            ),
+    #            tags$hr(),
+    #            downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success")
+    #          ),
+    #          mainPanel(
+    #            h4("Дендрограмма:"),
+    #            plotOutput("dendrogram"),
+    #            tags$hr(),
+    #            h4("Анализ главных компонент:"),
+    #            plotlyOutput("pca"),
+    #            h4("Кластеры"),
+    #            plotlyOutput("graph")
+    #          )
+    # )
   )
 )
 
