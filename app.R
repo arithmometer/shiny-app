@@ -12,21 +12,18 @@ library(mc2d)
 options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output, clientData, session) {
-  values <- reactiveValues()
-  
   inFile <- reactive(input$datafile)
   
   subsetCols <- c()
   subsetRows <- c()
   subsetColsFiltered <- c()
   subsetRowsFiltered <- c()
-  
-  values$n <- 0
-  values$m <- 0
-  values$num.filters <- c()
-  values$num.sorts <- c()
+
+  values <- reactiveValues()
   values$uploaded <- FALSE
   values$generated <- FALSE
+  values$insertedFilters <- c()
+  values$insertedSorts <- c()
 
   observeEvent(input$datafile, {
     values$df <- read.csv(inFile()$datapath, header = input$header, sep = input$sep)
@@ -40,7 +37,13 @@ server <- function(input, output, clientData, session) {
   })
   
   getTable <- reactive({
-    df <- subset(values$df[values$df[, "del"] == 0, ], select=-del)
+    validate(
+      need(values$df, "Сгенерируйте или загрузите данные")
+    )
+    df <- values$df
+    if("del" %in% colnames(df)) {
+      df <- subset(df[df[, "del"] == 0, ], select=-del)
+    }
     values$colnames <- colnames(df)
     updateSelectInput(session, "infoColumn", choices=colnames(df))
     updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
@@ -53,20 +56,20 @@ server <- function(input, output, clientData, session) {
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
-    for(i in values$num.filters) {
-      if(!is.null(input[[paste0("val", i)]]) && input[[paste0("val", i)]] != "") {
-        df <- switch(input[[paste0("op", i)]],
-                     "=" = df[df[, input[[paste0("col", i)]]] == input[[paste0("val", i)]],],
-                     "<" = df[df[, input[[paste0("col", i)]]] <  input[[paste0("val", i)]],],
-                     ">" = df[df[, input[[paste0("col", i)]]] >  input[[paste0("val", i)]],]
+    for(id in values$insertedFilters) {
+      if(!is.null(input[[paste0(id, "val")]]) && input[[paste0(id, "val")]] != "") {
+        df <- switch(input[[paste0(id, "op")]],
+                     "=" = df[df[, input[[paste0(id, "col")]]] == input[[paste0(id, "val")]],],
+                     "<" = df[df[, input[[paste0(id, "col")]]] <  input[[paste0(id, "val")]],],
+                     ">" = df[df[, input[[paste0(id, "col")]]] >  input[[paste0(id, "val")]],]
           )
       }
     }
-    for(i in values$num.sorts) {
-      if(!is.null(input[[paste0("sortcol", i)]])) {
-        df <- switch(input[[paste0("asc", i)]],
-                     "по возрастанию" = df[order(df[[paste0(input[[paste0("sortcol", i)]])]]), ],
-                     "по убыванию" = df[order(-df[[paste0(input[[paste0("sortcol", i)]])]]), ]
+    for(id in values$insertedSorts) {
+      if(!is.null(input[[paste0(id, "sortcol")]])) {
+        df <- switch(input[[paste0(id, "asc")]],
+                     "по возрастанию" = df[order(df[[paste0(input[[paste0(id, "sortcol")]])]]), ],
+                     "по убыванию" = df[order(-df[[paste0(input[[paste0(id, "sortcol")]])]]), ]
         )
       }
     }
@@ -189,7 +192,7 @@ server <- function(input, output, clientData, session) {
   
   output$outInfoColumn <- renderText({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     arr <- getFilteredSubTable()[, input$infoColumn]
     sprintf("Среднее: %f, стандартное отклонение: %f", mean(arr), sd(arr))
@@ -237,7 +240,7 @@ server <- function(input, output, clientData, session) {
   
   output$pca <- renderPlotly({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
@@ -259,7 +262,7 @@ server <- function(input, output, clientData, session) {
   
   output$graph <- renderPlotly({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     g <- graph.empty(input$numClusters, directed = FALSE)
     L <- layout.circle(g)
@@ -295,7 +298,7 @@ server <- function(input, output, clientData, session) {
   
   output$corrMatrix <- renderTable({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
@@ -305,7 +308,7 @@ server <- function(input, output, clientData, session) {
   
   output$covMatrix <- renderTable({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
@@ -350,7 +353,7 @@ server <- function(input, output, clientData, session) {
   
   output$subtable <- DT::renderDataTable({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     DT::datatable(getFilteredSubTable(),
                   options=list(pageLength=10, 
@@ -362,94 +365,58 @@ server <- function(input, output, clientData, session) {
   })
   
   observeEvent(input$addFilter, {
-    values$n <- values$n + 1
-    n <- values$n
-    values[[paste0("selected_col", n)]] <- 1
-    values[[paste0("selected_op", n)]] <- "="
-    values[[paste0("selected_val", n)]] <- ""
+    btn <- input$addFilter
+    id <- paste0("filter", btn)
+    insertUI(
+      selector = "#filterPanel",
+      ui = tags$div(
+        wellPanel(
+          fluidRow(column(4, selectizeInput(paste0(id, "col"), "", choices = values$colnames)),
+                   column(3, selectizeInput(paste0(id, "op"), "", multiple = F, choices = list("=", "<", ">"))),
+                   column(4, textInput(paste0(id, "val"), "")),
+                   column(1, actionButton(paste0(id, "delete"), "x", class="btn-danger"))
+          )
+        ),
+        id = id
+      )
+    )
     
-    values$num.filters <- c(values$num.filters, n)
-    output[[paste0("col", n)]] <- renderUI({
-      selectizeInput(paste0("col", n), "", choices = values$colnames, 
-                     selected = values[[paste0("selected_col", n)]])
-    })
-    output[[paste0("op", n)]] <- renderUI({
-      selectizeInput(paste0("op", n), "", multiple = F, choices = list("=", "<", ">"), 
-                     selected = values[[paste0("selected_op", n)]])
-    })
-    output[[paste0("val", n)]] <- renderUI({
-      textInput(paste0("val", n), "", value = values[[paste0("selected_val", n)]])
-    })
-    output[[paste0("remove", n)]] <- renderUI({
-      actionButton(paste0("remove", n), "x", class="btn-danger")
-    })
+    values$insertedFilters <<- c(values$insertedFilters, id)
     
-    observeEvent(input[[paste0("remove", n)]], {
-      values$num.filters <- values$num.filters[-which(values$num.filters == n)]
+    observeEvent(input[[paste0(id, "delete")]], {
+      removeUI(
+        selector = paste0("#", id)
+      )
+      values$insertedFilters <- values$insertedFilters[-which(values$insertedFilters == id)]
     })
-    observe({
-      values[[paste0("selected_col", n)]] <- input[[paste0("col", n)]]
-      values[[paste0("selected_op", n)]] <- input[[paste0("op", n)]]
-      values[[paste0("selected_val", n)]] <- input[[paste0("val", n)]]
-    })
-  })
-  
-  output$filter <- renderUI({
-    if(length(values$num.filters) > 0) {
-      lapply(values$num.filters, function(i) {
-        fluidRow(
-          column(4, uiOutput(paste0("col", i))),
-          column(3, uiOutput(paste0("op", i))),
-          column(3, uiOutput(paste0("val", i))),
-          column(2, uiOutput(paste0("remove", i)))
-        )
-      })
-    }
   })
   
   observeEvent(input$addSort, {
-    values$m <- values$m + 1
-    m <- values$m
-    values[[paste0("selected_sortcol", m)]] <- 1
-    values[[paste0("selected_asc", m)]] <- "по возрастанию"
+    btn <- input$addSort
+    id <- paste0("sort", btn)
+    insertUI(
+      selector = "#sortPanel",
+      ui = tags$div(
+        wellPanel(
+          fluidRow(column(5, selectizeInput(paste0(id, "sortcol"), "", choices = values$colnames)),
+                   column(6, selectizeInput(paste0(id, "asc"), "", multiple = F, choices = list("по возрастанию", "по убыванию"))),
+                   column(1, actionButton(paste0(id, "delete"), "x", class="btn-danger"))
+          )
+        ),
+        id = id
+      )
+    )
     
-    values$num.sorts <- c(values$num.sorts, m)
-    output[[paste0("sortcol", m)]] <- renderUI({
-      selectizeInput(paste0("sortcol", m), "", choices = values$colnames, 
-                     selected = values[[paste0("selected_sortcol", m)]])
-    })
-    output[[paste0("asc", m)]] <- renderUI({
-      selectizeInput(paste0("asc", m), "", multiple = F, choices = list("по возрастанию", "по убыванию"), 
-                     selected = values[[paste0("selected_asc", m)]])
-    })
-    output[[paste0("removesort", m)]] <- renderUI({
-      actionButton(paste0("removesort", m), "x", class="btn-danger")
-    })
+    values$insertedSorts <<- c(values$insertedSorts, id)
     
-    observeEvent(input[[paste0("removesort", m)]], {
-      values$num.sorts <- values$num.sorts[-which(values$num.sorts == m)]
-    })
-    observe({
-      values[[paste0("selected_sortcol", m, sep="")]] <- input[[paste0("sortcol", m)]]
-      values[[paste0("selected_asc", m, sep="")]] <- input[[paste0("asc", m)]]
+    observeEvent(input[[paste0(id, "delete")]], {
+      removeUI(
+        selector = paste0("#", id)
+      )
+      values$insertedSorts <- values$insertedSorts[-which(values$insertedSorts == id)]
     })
   })
-  
-  output$sort <- renderUI({
-    if(length(values$num.sorts) > 0) {
-      lapply(values$num.sorts, function(i) {
-        fluidRow(
-          column(5, uiOutput(paste0("sortcol", i))),
-          column(5, uiOutput(paste0("asc", i))),
-          column(2, uiOutput(paste0("removesort", i)))
-        )
-      })
-    }
-  })
-  
-  values$numBlobs <- 0
-  values$numBlackholes <- 0
-  
+
   insertedBlobs <- c()
   insertedBlackholes <- c()
   
@@ -484,7 +451,7 @@ server <- function(input, output, clientData, session) {
               uiOutput(paste0(id, "_distr_params", i))
             )
           }),
-          actionButton(paste0("deleteBlob", btn), "Удалить", class="btn-danger")
+          actionButton(paste0(id, "delete"), "Удалить", class="btn-danger")
         ),
         id = id
         )
@@ -523,7 +490,7 @@ server <- function(input, output, clientData, session) {
     
     insertedBlobs <<- c(insertedBlobs, id)
     
-    observeEvent(input[[paste0("deleteBlob", btn)]], {
+    observeEvent(input[[paste0(id, "delete")]], {
       values$generated <- FALSE
       removeUI(
         selector = paste0("#", id)
@@ -548,14 +515,14 @@ server <- function(input, output, clientData, session) {
           }),
           numericInput(paste0(id, "_r"), "Радиус", 1),
           numericInput(paste0(id, "_v"), "Скорость затухания", 0.5),
-          actionButton(paste0("deleteBlackhole", btn), "Удалить", class="btn-danger")
+          actionButton(paste0(id, "delete"), "Удалить", class="btn-danger")
         ),
         id = id
         )
     )
     insertedBlackholes <<- c(insertedBlackholes, id)
     
-    observeEvent(input[[paste0("deleteBlackhole", btn)]], {
+    observeEvent(input[[paste0(id, "delete")]], {
       values$generated <- FALSE
       removeUI(
         selector = paste0("#", id)
@@ -700,15 +667,15 @@ ui = tagList(
                h5("Строки подбазы"),
                textInput("subsetRows", label=""),
                tags$hr(),
-               uiOutput("filter"),
                actionButton("addFilter", "Добавить фильтр"),
+               tags$div(id = "filterPanel"),
                tags$hr(),
-               uiOutput("sort"),
                actionButton("addSort", "Добавить сортировку"),
+               tags$div(id = "sortPanel"),
                tags$hr(),
-               h5("Столбцы подбазы после сортировки"),
+               h5("Столбцы подбазы после фильтрации"),
                textInput("subsetColsFiltered", label=""),
-               h5("Строки подбазы после сортировки"),
+               h5("Строки подбазы после фильтрации"),
                textInput("subsetRowsFiltered", label=""),
                downloadButton("downloadData", "Скачать csv", class="btn-success")
              ),
