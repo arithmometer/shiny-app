@@ -34,15 +34,21 @@ server <- function(input, output, clientData, session) {
     values$generated <- FALSE
   })
   
-  getTable <- reactive({
+  getFullTable <- reactive({
     values$colnames <- colnames(values$df)
-    updateSelectInput(session, "infoColumn", choices=colnames(values$df))
-    updateSelectInput(session, "elementNames", choices=c("№", colnames(values$df)))
+    values$df
+  })
+  
+  getTable <- reactive({
+    df <- subset(values$df[values$df[, "del"] == 0, ], select=-del)
+    values$colnames <- colnames(df)
+    updateSelectInput(session, "infoColumn", choices=colnames(df))
+    updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
     updateTextInput(session, "subsetCols", "")
     updateTextInput(session, "subsetRows", "")
     updateTextInput(session, "subsetColsFiltered", "")
     updateTextInput(session, "subsetRowsFiltered", "")
-    values$df
+    df
   })
   
   getSubTable <- reactive({
@@ -172,6 +178,15 @@ server <- function(input, output, clientData, session) {
                   ))
   })
   
+  output$fulltable <- DT::renderDataTable({
+    DT::datatable(getFullTable(),
+                  options=list(pageLength=10, 
+                               lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
+                               searching=FALSE,
+                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Russian.json')
+                  ))
+  })
+  
   output$outInfoColumn <- renderText({
     validate(
       need(values$df, "Generate or upload data")
@@ -182,7 +197,7 @@ server <- function(input, output, clientData, session) {
   
   output$densityPlot <- renderPlotly({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     
     validate(
@@ -199,7 +214,7 @@ server <- function(input, output, clientData, session) {
   
   output$dendrogram <- renderPlot({
     validate(
-      need(values$df, "Generate or upload data")
+      need(values$df, "Сгенерируйте или загрузите данные")
     )
     dd <- as.dendrogram(getHC())
     df <- dendro_data(dd)
@@ -299,7 +314,7 @@ server <- function(input, output, clientData, session) {
   })
   
   output$downloadData <- downloadHandler(
-    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_subset", ".csv"),
+    filename = "subset.csv",
     content = function(file) {
       write.table(getFilteredSubTable(), file, sep=",", row.names = FALSE)
     }
@@ -308,7 +323,7 @@ server <- function(input, output, clientData, session) {
   output$downloadGenerated <- downloadHandler(
     filename = "generated_dataset.csv",
     content = function(file) {
-      write.table(values$df, file, sep=",", row.names = FALSE)
+      write.table(getTable(), file, sep=",", row.names = FALSE)
     }
   )
   
@@ -448,11 +463,13 @@ server <- function(input, output, clientData, session) {
     values$generated <- FALSE
     btn <- input$insertBlob
     id <- paste0("blob", btn)
+    values[[paste0(id, "_M")]] <- input$M
     insertUI(
       selector = "#generatorPanel",
       ui = tags$div(
         wellPanel(
           h4(paste0("Параметры набора ", btn, ":")),
+          numericInput(paste0(id, "_N"), "N", 10, min=1, max=1000),
           lapply(1:input$M, function(i) {
             fluidRow(
               column(3, selectInput(paste0(id, "_distr", i), label = paste0("X", i),
@@ -481,24 +498,24 @@ server <- function(input, output, clientData, session) {
                  column(2, numericInput(paste0(id, "_distr", i, "_sd"), "sd", 1, min=0))
                ),
                Poisson = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_lambda"), "lambda", 1, min=0))
+                 column(2, numericInput(paste0(id, "_distr", i, "_lambda"), "lambda", 1, min=0))
                ),
                Laplace = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_m"), "m", 0)),
-                 column(2, numericInput(paste(id, "_distr", i, "_s"), "s", 0))
+                 column(2, numericInput(paste0(id, "_distr", i, "_m"), "m", 0)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_s"), "s", 0))
                ),
                uniform = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_min"), "min", 0)),
-                 column(2, numericInput(paste(id, "_distr", i, "_max"), "max", 1))
+                 column(2, numericInput(paste0(id, "_distr", i, "_min"), "min", 0)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_max"), "max", 1))
                ),
                triangular = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_min"),  "min", -1)),
-                 column(2, numericInput(paste(id, "_distr", i, "_mode"), "mode", 0)),
-                 column(2, numericInput(paste(id, "_distr", i, "_max"),  "max", 1))
+                 column(2, numericInput(paste0(id, "_distr", i, "_min"),  "min", -1)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_mode"), "mode", 0)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_max"),  "max", 1))
                ),
                binomial = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_size"), "size", 1, min=1)),
-                 column(2, numericInput(paste(id, "_distr", i, "_prob"), "prob", 0.5, min=0, max=1))
+                 column(2, numericInput(paste0(id, "_distr", i, "_size"), "size", 1, min=1)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_prob"), "prob", 0.5, min=0, max=1))
                )
                )
       })
@@ -519,6 +536,7 @@ server <- function(input, output, clientData, session) {
     values$generated <- FALSE
     btn <- input$insertBlackhole
     id <- paste0("blackhole", btn)
+    values[[paste0(id, "_M")]] <- input$M
     
     insertUI(
       selector = "#generatorPanel",
@@ -548,22 +566,78 @@ server <- function(input, output, clientData, session) {
   
   validateGenerator <- function() {
     ok <- TRUE
-    for(el in insertedBlobs) {
-      # TODO: check number of dimensions
+    if(length(insertedBlobs) == 0) {
+      showNotification(paste0("Не указано ни одного набора данных"), type="error")
+      ok <- FALSE
     }
-    for(el in insertedBlackholes) {
-      
+    for(id in insertedBlobs) {
+      if(values[[paste0(id, "_M")]] != input$M) {
+        showNotification(paste0("Количество измерений в наборе ", substring(id, 5), " неверно"), type="error")
+        ok <- FALSE
+      }
+    }
+    for(id in insertedBlackholes) {
+      if(values[[paste0(id, "_M")]] != input$M) {
+        showNotification(paste0("Количество измерений в дыре ", substring(id, 10), " неверно"), type="error")
+        ok <- FALSE
+      }
     }
     return(ok)
+  }
+  
+  bell <- function(x, alpha) {
+    return((4 * x * (1 - x))**alpha)
   }
   
   observeEvent(input$generate, {
     if(validateGenerator()) {
       values$generated <- TRUE
       values$uploaded <- FALSE
+      df <- data.frame()
+      for(id in insertedBlobs) {
+        l <- lapply(1:input$M, function(i) {
+          switch(input[[paste0(id, "_distr", i)]],
+                 normal = rnorm(n = input[[paste0(id, "_N")]],
+                                mean = input[[paste0(id, "_distr", i, "_mean")]],
+                                sd = input[[paste0(id, "_distr", i, "_sd")]]),
+                 Poisson = rpois(n = input[[paste0(id, "_N")]],
+                                 lambda = input[[paste0(id, "_distr", i, "_lambda")]]),
+                 Laplace = rlaplace(n = input[[paste0(id, "_N")]],
+                                    m = input[[paste0(id, "_distr", i, "_m")]],
+                                    s = input[[paste0(id, "_distr", i, "_s")]]),
+                 uniform = runif(n = input[[paste0(id, "_N")]],
+                                 min = input[[paste0(id, "_distr", i, "_min")]],
+                                 max = input[[paste0(id, "_distr", i, "_max")]]),
+                 triangular = rtriang(n = input[[paste0(id, "_N")]],
+                                        min = input[[paste0(id, "_distr", i, "_min")]],
+                                        mode = input[[paste0(id, "_distr", i, "_mode")]],
+                                        max = input[[paste0(id, "_distr", i, "_max")]]),
+                 binomial = rbinom(n = input[[paste0(id, "_N")]],
+                                   size = input[[paste0(id, "_distr", i, "_size")]],
+                                   prob = input[[paste0(id, "_distr", i, "_prob")]]
+                                   )
+          )
+        })
+        tdf <- do.call(cbind.data.frame, l)
+        colnames(tdf) <- sapply(1:input$M, function(i) paste0("X", i))
+        df <- rbind(df, tdf)
+      }
+      df["del"] <- rep(0, nrow(df))
+
+      for(id in insertedBlackholes) {
+        for(j in 1:nrow(df)) {
+          dist <- sum((unlist(subset(df[j, ], select=-del)) - unlist(lapply(1:input$M, function(i) as.double(input[[paste0(id, "_x", i)]]))))**2)
+          if(dist < input[[paste0(id, "_r")]]**2) {
+            p <- bell(dist / (2 * input[[paste0(id, "_r")]]) + 0.5, input[[paste0(id, "_v")]])
+            if(rbinom(1, 1, p)) {
+              df[j, "del"] <- 1
+            }
+          }
+        }
+      }
+      df <- cbind("id" = seq.int(nrow(df)), df)
+      values$df <- df
     }
-    # TODO: generate dataset
-    values$df <- data.frame("x" = c(1, 2, 3), "y" = c(2, 3, 5))
   })
 }
 
@@ -574,7 +648,6 @@ ui = tagList(
     tabPanel("Генерация",
              sidebarPanel(
                numericInput("M", "M", 1, min=1, max=10),
-               numericInput("N", "N", 100, min=1, max=1000),
                tags$hr(),
                actionButton("insertBlob", "Добавить набор"),
                actionButton("insertBlackhole", "Добавить дыру"),
@@ -582,7 +655,7 @@ ui = tagList(
                fluidRow(
                  column(4, actionButton("generate", "Сгенерировать", class="btn-info")),
                  column(4, conditionalPanel(condition = "output.generated", p("Сгенерировано!"))),
-                 column(4, actionButton("downloadGenerated", "Скачать", class="btn-success"))
+                 column(4, downloadButton("downloadGenerated", "Скачать", class="btn-success"))
                ),
                tags$hr(),
                fileInput("datafile", "или выбрать файл для загрузки",
@@ -612,6 +685,11 @@ ui = tagList(
              mainPanel(
                tags$div(id = "generatorPanel")
              )
+    ),
+    tabPanel("Полная таблица",
+      mainPanel(
+        DT::dataTableOutput("fulltable")
+      )
     ),
     tabPanel("Таблица",
              sidebarPanel(
