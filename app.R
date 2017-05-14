@@ -4,6 +4,8 @@ library(plotly)
 library(ggplot2)
 library(ggdendro)
 library(igraph)
+library(rmutil)
+library(mc2d)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
@@ -336,7 +338,7 @@ server <- function(input, output, clientData, session) {
       textInput(paste0("val", n), "", value = values[[paste0("selected_val", n)]])
     })
     output[[paste0("remove", n)]] <- renderUI({
-      actionButton(paste0("remove", n), "x")
+      actionButton(paste0("remove", n), "x", class="btn-danger")
     })
     
     observeEvent(input[[paste0("remove", n)]], {
@@ -378,7 +380,7 @@ server <- function(input, output, clientData, session) {
                      selected = values[[paste0("selected_asc", m)]])
     })
     output[[paste0("removesort", m)]] <- renderUI({
-      actionButton(paste0("removesort", m), "x")
+      actionButton(paste0("removesort", m), "x", class="btn-danger")
     })
     
     observeEvent(input[[paste0("removesort", m)]], {
@@ -401,6 +403,138 @@ server <- function(input, output, clientData, session) {
       })
     }
   })
+  
+  values$generated <- FALSE
+  values$numBlobs <- 0
+  values$numBlackholes <- 0
+  
+  insertedBlobs <- c()
+  insertedBlackholes <- c()
+  
+  output$generated <- reactive({
+    values$generated
+  })
+  
+  outputOptions(output, "generated", suspendWhenHidden=FALSE)
+  
+  observeEvent(input$insertBlob, {
+    values$generated <- FALSE
+    btn <- input$insertBlob
+    id <- paste0("blob", btn)
+    insertUI(
+      selector = "#generatorPanel",
+      ui = tags$div(
+        wellPanel(
+          h4("Параметры набора:"),
+          lapply(1:input$M, function(i) {
+            fluidRow(
+              column(3, selectInput(paste0(id, "_distr", i), label = paste0("X", i),
+                        choices = list("Нормальное" = "normal",
+                                       "Пуассона" = "Poisson",
+                                       "Лапласа" = "Laplace",
+                                       "Равномерное" = "uniform",
+                                       "Треугольное" = "triangular",
+                                       "Биномиальное" = "binomial"
+                                       ),
+                        selected = "normal")),
+              uiOutput(paste0(id, "_distr_params1"))
+              # switch(input[[paste0(id, "_distr", i)]],
+                     # normal = h4("A")
+                       # h4(paste0(id, "_distr", i))
+                       # column(2, textInput(paste0(id, "_distr", i, "_mean"), "mean"))
+                       # column(2, textInput(paste0(id, "_distr", i, "_sd"), "sd"))
+                     # }
+                     # )
+            )
+          }),
+          actionButton(paste0("deleteBlob", btn), "Удалить", class="btn-danger")
+        ),
+        id = id
+        )
+    )
+    
+    lapply(1:input$M, function(i) {
+      output[[paste0(id, "_distr_params", i)]] <- renderUI({
+        switch(input[[paste0(id, "_distr", i)]],
+               normal = fluidRow(
+                 column(2, numericInput(paste0(id, "_distr", i, "_mean"), "mean", 0)),
+                 column(2, numericInput(paste0(id, "_distr", i, "_sd"), "sd", 1))
+               ),
+               Poisson = fluidRow(
+                 column(2, numericInput(paste(id, "_distr", i, "_lambda"), "lambda", 1))
+               ),
+               Laplace = fluidRow(
+                 column(2, numericInput(paste(id, "_distr", i, "_m"), "m", 0)),
+                 column(2, numericInput(paste(id, "_distr", i, "_s"), "s", 0))
+               ),
+               uniform = fluidRow(
+                 column(2, numericInput(paste(id, "_distr", i, "_min"), "min", 0)),
+                 column(2, numericInput(paste(id, "_distr", i, "_max"), "max", 1))
+               ),
+               triangular = fluidRow(
+                 column(2, numericInput(paste(id, "_distr", i, "_min"),  "min", -1)),
+                 column(2, numericInput(paste(id, "_distr", i, "_mode"), "mode", 0)),
+                 column(2, numericInput(paste(id, "_distr", i, "_max"),  "max", 1))
+               ),
+               binomial = fluidRow(
+                 column(2, numericInput(paste(id, "_distr", i, "_size"), "size", 1)),
+                 column(2, numericInput(paste(id, "_distr", i, "_prob"), "prob", 0.5))
+               )
+               )
+      })
+    })
+    
+    insertedBlobs <<- c(insertedBlobs, id)
+    
+    observeEvent(input[[paste0("deleteBlob", btn)]], {
+      removeUI(
+        selector = paste0("#", id)
+      )
+      insertedBlobs <<- insertedBlobs[-which(insertedBlobs == id)]
+    })
+  })
+  
+  observeEvent(input$insertBlackhole, {
+    values$generated <- FALSE
+    btn <- input$insertBlackhole
+    id <- paste0("blackhole", btn)
+    
+    insertUI(
+      selector = "#generatorPanel",
+      ui = tags$div(
+        wellPanel(
+          h4("Центр дыры:"),
+          lapply(1:input$M, function(i) {
+            textInput(paste0(id, "_x", i), paste0("X", i))
+          }),
+          textInput(paste0(id, "_r"), "Радиус"),
+          textInput(paste0(id, "_v"), "Скорость затухания"),
+          actionButton(paste0("deleteBlackhole", btn), "Удалить", class="btn-danger")
+        ),
+        id = id
+        )
+    )
+    insertedBlackholes <<- c(insertedBlackholes, id)
+    
+    observeEvent(input[[paste0("deleteBlackhole", btn)]], {
+      removeUI(
+        selector = paste0("#", id)
+      )
+      insertedBlackholes <<- insertedBlackholes[-which(insertedBlackholes == id)]
+    })
+  })
+  
+  validateGenerator <- function() {
+    return(TRUE)
+  }
+  
+  observeEvent(input$generate, {
+    if(validateGenerator()) {
+      values$generated <- TRUE
+    }
+    # TODO: validate inputs
+    # TODO: generate dataset
+  })
 }
 
 ui = tagList(
@@ -411,11 +545,15 @@ ui = tagList(
              sidebarPanel(
                numericInput("M", "M", 1, min=1, max=10),
                numericInput("N", "N", 100, min=1, max=1000),
-               tags$hr()
-               # динамическое количество полей для видов распределений
+               tags$hr(),
+               actionButton("insertBlob", "Добавить набор"),
+               actionButton("insertBlackhole", "Добавить дыру"),
+               tags$hr(),
+               actionButton("generate", "Сгенерировать"),
+               conditionalPanel(condition = "output.generated", p("Сгенерировано!"))
              ),
              mainPanel(
-               
+               tags$div(id = "generatorPanel")
              )
     ),
     tabPanel("Загрузка из файла",
