@@ -25,28 +25,34 @@ server <- function(input, output, clientData, session) {
   values$m <- 0
   values$num.filters <- c()
   values$num.sorts <- c()
+  values$uploaded <- FALSE
+  values$generated <- FALSE
+
+  observeEvent(input$datafile, {
+    values$df <- read.csv(inFile()$datapath, header = input$header, sep = input$sep)
+    values$uploaded <- TRUE
+    values$generated <- FALSE
+  })
   
   getTable <- reactive({
-    df <- read.csv(inFile()$datapath, header = input$header, sep = input$sep)
-    values$colnames <- colnames(df)
-    updateSelectInput(session, "infoColumn", choices=colnames(df))
-    updateSelectInput(session, "elementNames", choices=c("№", colnames(df)))
+    values$colnames <- colnames(values$df)
+    updateSelectInput(session, "infoColumn", choices=colnames(values$df))
+    updateSelectInput(session, "elementNames", choices=c("№", colnames(values$df)))
     updateTextInput(session, "subsetCols", "")
     updateTextInput(session, "subsetRows", "")
     updateTextInput(session, "subsetColsFiltered", "")
     updateTextInput(session, "subsetRowsFiltered", "")
-    df
+    values$df
   })
   
   getSubTable <- reactive({
     df <- getTable()[unlist(getSubsetRows()), unlist(getSubsetCols()), drop=FALSE]
-    # df <- df[unlist(getSubsetRowsFiltered()), unlist(getSubsetColsFiltered()), drop=FALSE]
     for(i in values$num.filters) {
       if(!is.null(input[[paste0("val", i)]]) && input[[paste0("val", i)]] != "") {
         df <- switch(input[[paste0("op", i)]],
                      "=" = df[df[, input[[paste0("col", i)]]] == input[[paste0("val", i)]],],
-                     "<" = df[df[, input[[paste0("col", i)]]] < input[[paste0("val", i)]],],
-                     ">" = df[df[, input[[paste0("col", i)]]] > input[[paste0("val", i)]],]
+                     "<" = df[df[, input[[paste0("col", i)]]] <  input[[paste0("val", i)]],],
+                     ">" = df[df[, input[[paste0("col", i)]]] >  input[[paste0("val", i)]],]
           )
       }
     }
@@ -158,9 +164,6 @@ server <- function(input, output, clientData, session) {
   })
   
   output$maintable <- DT::renderDataTable({
-    if (is.null(inFile())) {
-      return(NULL)
-    }
     DT::datatable(getTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
@@ -170,17 +173,17 @@ server <- function(input, output, clientData, session) {
   })
   
   output$outInfoColumn <- renderText({
-    if (is.null(inFile())) {
-      return(NULL)
-    }
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     arr <- getFilteredSubTable()[, input$infoColumn]
     sprintf("Среднее: %f, стандартное отклонение: %f", mean(arr), sd(arr))
     })
   
   output$densityPlot <- renderPlotly({
-    if (is.null(inFile())) {
-      return(NULL)
-    }
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     
     validate(
       need(as.numeric(getFilteredSubTable()[, input$infoColumn]), "Выберите числовой столбец")
@@ -195,6 +198,9 @@ server <- function(input, output, clientData, session) {
   })
   
   output$dendrogram <- renderPlot({
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     dd <- as.dendrogram(getHC())
     df <- dendro_data(dd)
     ggdendrogram(df)
@@ -216,7 +222,13 @@ server <- function(input, output, clientData, session) {
   
   output$pca <- renderPlotly({
     validate(
+      need(values$df, "Generate or upload data")
+    )
+    validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
+    )
+    validate(
+      need(ncol(getFilteredSubTable()) > 2, "Количество столбцов недостаточно")
     )
     pca <- princomp(getFilteredSubTable(), cor = TRUE)
     clusters <- getClusters()
@@ -231,6 +243,9 @@ server <- function(input, output, clientData, session) {
   })
   
   output$graph <- renderPlotly({
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     g <- graph.empty(input$numClusters, directed = FALSE)
     L <- layout.circle(g)
     clusters <- getClusters()
@@ -265,12 +280,18 @@ server <- function(input, output, clientData, session) {
   
   output$corrMatrix <- renderTable({
     validate(
+      need(values$df, "Generate or upload data")
+    )
+    validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
     )
     getCorrMatrix()
   })
   
   output$covMatrix <- renderTable({
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     validate(
       need(is.numeric(as.matrix(getFilteredSubTable())), "Матрица содержит нечисловой столбец")
     )
@@ -284,31 +305,38 @@ server <- function(input, output, clientData, session) {
     }
   )
   
+  output$downloadGenerated <- downloadHandler(
+    filename = "generated_dataset.csv",
+    content = function(file) {
+      write.table(values$df, file, sep=",", row.names = FALSE)
+    }
+  )
+  
   output$downloadCorr <- downloadHandler(
-    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_corr", ".csv"),
+    filename = "corr.csv",
     content = function(file) {
       write.table(getCorrMatrix(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadCov <- downloadHandler(
-    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_cov", ".csv"),
+    filename = "cov.csv",
     content = function(file) {
       write.table(getCovMatrix(), file, sep=",", row.names = FALSE)
     }
   )
   
   output$downloadDist <- downloadHandler(
-    filename = paste0(substr(inFile(), 1, nchar(inFile())-4), "_adjacency", ".csv"),
+    filename = "adjacency.csv",
     content = function(file) {
       write.table(as.matrix(getDist()), file, sep=",", row.names = FALSE)
     }
   )
   
   output$subtable <- DT::renderDataTable({
-    if (is.null(inFile())) {
-      return(NULL)
-    }
+    validate(
+      need(values$df, "Generate or upload data")
+    )
     DT::datatable(getFilteredSubTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
@@ -404,7 +432,6 @@ server <- function(input, output, clientData, session) {
     }
   })
   
-  values$generated <- FALSE
   values$numBlobs <- 0
   values$numBlackholes <- 0
   
@@ -425,7 +452,7 @@ server <- function(input, output, clientData, session) {
       selector = "#generatorPanel",
       ui = tags$div(
         wellPanel(
-          h4("Параметры набора:"),
+          h4(paste0("Параметры набора ", btn, ":")),
           lapply(1:input$M, function(i) {
             fluidRow(
               column(3, selectInput(paste0(id, "_distr", i), label = paste0("X", i),
@@ -437,14 +464,7 @@ server <- function(input, output, clientData, session) {
                                        "Биномиальное" = "binomial"
                                        ),
                         selected = "normal")),
-              uiOutput(paste0(id, "_distr_params1"))
-              # switch(input[[paste0(id, "_distr", i)]],
-                     # normal = h4("A")
-                       # h4(paste0(id, "_distr", i))
-                       # column(2, textInput(paste0(id, "_distr", i, "_mean"), "mean"))
-                       # column(2, textInput(paste0(id, "_distr", i, "_sd"), "sd"))
-                     # }
-                     # )
+              uiOutput(paste0(id, "_distr_params", i))
             )
           }),
           actionButton(paste0("deleteBlob", btn), "Удалить", class="btn-danger")
@@ -458,10 +478,10 @@ server <- function(input, output, clientData, session) {
         switch(input[[paste0(id, "_distr", i)]],
                normal = fluidRow(
                  column(2, numericInput(paste0(id, "_distr", i, "_mean"), "mean", 0)),
-                 column(2, numericInput(paste0(id, "_distr", i, "_sd"), "sd", 1))
+                 column(2, numericInput(paste0(id, "_distr", i, "_sd"), "sd", 1, min=0))
                ),
                Poisson = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_lambda"), "lambda", 1))
+                 column(2, numericInput(paste(id, "_distr", i, "_lambda"), "lambda", 1, min=0))
                ),
                Laplace = fluidRow(
                  column(2, numericInput(paste(id, "_distr", i, "_m"), "m", 0)),
@@ -477,8 +497,8 @@ server <- function(input, output, clientData, session) {
                  column(2, numericInput(paste(id, "_distr", i, "_max"),  "max", 1))
                ),
                binomial = fluidRow(
-                 column(2, numericInput(paste(id, "_distr", i, "_size"), "size", 1)),
-                 column(2, numericInput(paste(id, "_distr", i, "_prob"), "prob", 0.5))
+                 column(2, numericInput(paste(id, "_distr", i, "_size"), "size", 1, min=1)),
+                 column(2, numericInput(paste(id, "_distr", i, "_prob"), "prob", 0.5, min=0, max=1))
                )
                )
       })
@@ -487,6 +507,7 @@ server <- function(input, output, clientData, session) {
     insertedBlobs <<- c(insertedBlobs, id)
     
     observeEvent(input[[paste0("deleteBlob", btn)]], {
+      values$generated <- FALSE
       removeUI(
         selector = paste0("#", id)
       )
@@ -503,12 +524,12 @@ server <- function(input, output, clientData, session) {
       selector = "#generatorPanel",
       ui = tags$div(
         wellPanel(
-          h4("Центр дыры:"),
+          h4(paste0("Центр дыры ", btn, ":")),
           lapply(1:input$M, function(i) {
-            textInput(paste0(id, "_x", i), paste0("X", i))
+            numericInput(paste0(id, "_x", i), paste0("X", i), 0)
           }),
-          textInput(paste0(id, "_r"), "Радиус"),
-          textInput(paste0(id, "_v"), "Скорость затухания"),
+          numericInput(paste0(id, "_r"), "Радиус", 1),
+          numericInput(paste0(id, "_v"), "Скорость затухания", 0.5),
           actionButton(paste0("deleteBlackhole", btn), "Удалить", class="btn-danger")
         ),
         id = id
@@ -517,6 +538,7 @@ server <- function(input, output, clientData, session) {
     insertedBlackholes <<- c(insertedBlackholes, id)
     
     observeEvent(input[[paste0("deleteBlackhole", btn)]], {
+      values$generated <- FALSE
       removeUI(
         selector = paste0("#", id)
       )
@@ -525,15 +547,23 @@ server <- function(input, output, clientData, session) {
   })
   
   validateGenerator <- function() {
-    return(TRUE)
+    ok <- TRUE
+    for(el in insertedBlobs) {
+      # TODO: check number of dimensions
+    }
+    for(el in insertedBlackholes) {
+      
+    }
+    return(ok)
   }
   
   observeEvent(input$generate, {
     if(validateGenerator()) {
       values$generated <- TRUE
+      values$uploaded <- FALSE
     }
-    # TODO: validate inputs
     # TODO: generate dataset
+    values$df <- data.frame("x" = c(1, 2, 3), "y" = c(2, 3, 5))
   })
 }
 
@@ -549,42 +579,41 @@ ui = tagList(
                actionButton("insertBlob", "Добавить набор"),
                actionButton("insertBlackhole", "Добавить дыру"),
                tags$hr(),
-               actionButton("generate", "Сгенерировать"),
-               conditionalPanel(condition = "output.generated", p("Сгенерировано!"))
+               fluidRow(
+                 column(4, actionButton("generate", "Сгенерировать", class="btn-info")),
+                 column(4, conditionalPanel(condition = "output.generated", p("Сгенерировано!"))),
+                 column(4, actionButton("downloadGenerated", "Скачать", class="btn-success"))
+               ),
+               tags$hr(),
+               fileInput("datafile", "или выбрать файл для загрузки",
+                         accept = c(
+                           "text/csv",
+                           "text/comma-separated-values",
+                           "text/tab-separated-values",
+                           "text/plain",
+                           ".csv",
+                           ".tsv"
+                         ),
+                         buttonLabel="Загрузить",
+                         placeholder="Файл не выбран"
+               ),
+               checkboxInput("header", "Заголовок", TRUE),
+               radioButtons("sep", "Разделитель:",
+                            c("Запятая"=",",
+                              "Точка с запятой"=";",
+                              "Табуляция"="\t"),
+                            ","),
+               tags$hr(),
+               p("Для тестирования можете загрузить примеры файлов .csv or .tsv:",
+                 a(href = "mtcars.csv", "mtcars.csv"), "или",
+                 a(href = "pressure.tsv", "pressure.tsv")
+               )
              ),
              mainPanel(
                tags$div(id = "generatorPanel")
              )
     ),
-    tabPanel("Загрузка из файла",
-             sidebarPanel(
-               fileInput('datafile', 'Выбрать файл для загрузки',
-                         accept = c(
-                           'text/csv',
-                           'text/comma-separated-values',
-                           'text/tab-separated-values',
-                           'text/plain',
-                           '.csv',
-                           '.tsv'
-                         )
-               ),
-               checkboxInput('header', 'Заголовок', TRUE),
-               radioButtons('sep', 'Разделитель:',
-                            c('Запятая'=',',
-                              'Точка с запятой'=';',
-                              'Табуляция'='\t'),
-                            ','),
-               tags$hr(),
-               p('Для тестирования можете загрузить примеры файлов .csv or .tsv:',
-                 a(href = 'mtcars.csv', 'mtcars.csv'), 'или',
-                 a(href = 'pressure.tsv', 'pressure.tsv')
-               )
-             ),
-             mainPanel(
-               DT::dataTableOutput("maintable")
-               )
-    ),
-    tabPanel("Подбаза",
+    tabPanel("Таблица",
              sidebarPanel(
                p("Номера строк и столбцов следует указывать через запятую, ",
                  "интервалы можно указывать через тире. Например: 1,2,3-10,15-17,20"),
@@ -603,9 +632,13 @@ ui = tagList(
                textInput("subsetColsFiltered", label=""),
                h5("Строки подбазы после сортировки"),
                textInput("subsetRowsFiltered", label=""),
-               downloadButton("downloadData", "Скачать csv")
+               downloadButton("downloadData", "Скачать csv", class="btn-success")
              ),
              mainPanel(
+               h2("Исходная таблица"),
+               DT::dataTableOutput("maintable"),
+               tags$hr(),
+               h2("Подбаза"),
                DT::dataTableOutput("subtable")
              )
     ),
@@ -623,11 +656,11 @@ ui = tagList(
              mainPanel(
                h4("Матрица корреляции:"),
                tableOutput("corrMatrix"),
-               downloadButton("downloadCorr", "Скачать csv"),
+               downloadButton("downloadCorr", "Скачать csv", class="btn-success"),
                tags$hr(),
                h4("Матрица ковариации:"),
                tableOutput("covMatrix"),
-               downloadButton("downloadCov", "Скачать csv")
+               downloadButton("downloadCov", "Скачать csv", class="btn-success")
              )
     ),
     tabPanel("Кластеризация",
@@ -644,7 +677,7 @@ ui = tagList(
                  "elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE
                ),
                tags$hr(),
-               downloadButton("downloadDist", "Скачать матрицу смежности")
+               downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success")
              ),
              mainPanel(
                h4("Дендрограмма:"),
