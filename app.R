@@ -6,6 +6,7 @@ library(ggdendro)
 library(igraph)
 library(rmutil)
 library(mc2d)
+library(ggfortify)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
@@ -27,6 +28,9 @@ server <- function(input, output, clientData, session) {
 
   observeEvent(input$datafile, {
     values$df <- read.csv(inFile()$datapath, header = input$header, sep = input$sep)
+    if(!("del" %in% colnames(values$df))) {
+      values$df["del"] <- 0
+    }
     values$uploaded <- TRUE
     values$generated <- FALSE
   })
@@ -78,7 +82,8 @@ server <- function(input, output, clientData, session) {
   })
   
   getFilteredSubTable <- reactive({
-    getSubTable()[unlist(getSubsetRowsFiltered()), unlist(getSubsetColsFiltered()), drop=FALSE]
+    wn <- getSubTable()[unlist(getSubsetRowsFiltered()), unlist(getSubsetColsFiltered()), drop=FALSE]
+    wn[ , !names(wn) %in% c(input$elementNames)]
   })
   
   getSubTableRowNames <- reactive({
@@ -173,6 +178,9 @@ server <- function(input, output, clientData, session) {
   })
   
   output$maintable <- DT::renderDataTable({
+    validate(
+      need(nrow(getTable()) > 0, "Нет ни одной строки")
+    )
     DT::datatable(getTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
@@ -182,6 +190,9 @@ server <- function(input, output, clientData, session) {
   })
   
   output$fulltable <- DT::renderDataTable({
+    validate(
+      need(nrow(getTable()) > 0, "Нет ни одной строки")
+    )
     DT::datatable(getFullTable(),
                   options=list(pageLength=10, 
                                lengthMenu=list(c(5, 10, 30, 100, -1), c('5', '10', '30', '100', 'Все')),
@@ -219,10 +230,25 @@ server <- function(input, output, clientData, session) {
     validate(
       need(values$df, "Сгенерируйте или загрузите данные")
     )
+    validate(
+      need(input$clusteringMethod != "kmeans", "Недоступно для k-means")
+    )
     dd <- as.dendrogram(getHC())
     df <- dendro_data(dd)
     ggdendrogram(df)
   })
+  
+  # getDist <- reactive({
+  #   x <- getFilteredSubTable()
+  #   if(input$metric == "euclid") {
+  #     d <- dist(x)  
+  #   } else {
+  #     center <- colMeans(x)
+  #     covar <- cov(x)
+  #     d <- sqrt(mahalanobis(x, center, covar)) # возвращает квадраты расстояний
+  #   }
+  #   d
+  # })
   
   getDist <- reactive({
     dist(getFilteredSubTable())
@@ -233,9 +259,22 @@ server <- function(input, output, clientData, session) {
   })
   
   getClusters <- reactive({
-    hc <- getHC()
-    clusters <- cutree(hc, k = input$numClusters)
+    if(input$clusteringMethod == "kmeans") {
+      clusters <- kmeans(getFilteredSubTable(), input$numClusters)$cluster
+    } else {
+      hc <- getHC()
+      clusters <- cutree(hc, k = input$numClusters)
+    }
     clusters
+  })
+  
+  getPCA <- reactive({
+    pca <- princomp(getFilteredSubTable(), cor = TRUE)
+    comps <- colnames(pca$scores)
+    updateSelectInput(session, "pc1", "PC1", choices=comps, selected=comps[1])
+    updateSelectInput(session, "pc2", "PC2", choices=comps, selected=comps[2])
+    updateSelectInput(session, "pc3", "PC3", choices=comps, selected=comps[3])
+    pca
   })
   
   output$pca <- renderPlotly({
@@ -248,16 +287,16 @@ server <- function(input, output, clientData, session) {
     validate(
       need(ncol(getFilteredSubTable()) > 2, "Количество столбцов недостаточно")
     )
-    pca <- princomp(getFilteredSubTable(), cor = TRUE)
+    pca <- getPCA()
     clusters <- getClusters()
     df <- data.frame(pca$scores, "cluster" = factor(clusters))
     df <- transform(df, cluster_name = paste("Cluster", clusters))
-    plot_ly(df, x = ~Comp.1, y = ~Comp.2, z = ~Comp.3, type = "scatter3d", mode = "markers",
+    plot_ly(df, x = ~df[, input$pc1], y = ~df[, input$pc2], z = ~df[, input$pc3], type = "scatter3d", mode = "markers",
             color = ~cluster_name, marker = list(symbol = 'circle', size = 4)) %>%
       layout(title="Анализ главных компонент",
-             scene = list(xaxis = list(title="PC1"),
-                          yaxis = list(title="PC2"),
-                          zaxis = list(title="PC3")))
+             scene = list(xaxis = list(title=input$pc1),
+                          yaxis = list(title=input$pc2),
+                          zaxis = list(title=input$pc3)))
   })
   
   output$graph <- renderPlotly({
@@ -606,6 +645,56 @@ server <- function(input, output, clientData, session) {
       values$df <- df
     }
   })
+  
+  observeEvent(input$generateL, {
+    x <- getFilteredSubTable()
+    M <- ncol(x)
+    l <- lapply(1:M, function(i) {
+      runif(n = input$LN, min = min(x[, i]), max = max(x[, i]))
+    })
+    df <- do.call(cbind.data.frame, l)
+    colnames(df) <- sapply(1:M, function(i) paste0("X", i))
+    values$L <- df
+  })
+  
+  dst2 <- function(x, y, n) {
+    sum((x[1:n] - y[1:n])**2)
+  }
+  
+  observeEvent(input$removeM, {
+    x <- getFilteredSubTable()
+    names <- rownames(x)
+    for(i in 1:nrow(x)) {
+      for(j in 1:nrow(values$L)) {
+        d <- dst2(unlist(values$L[j, ]), unlist(x[i, ]), ncol(values$L))
+        if(d < input$eps**2) {
+          values$df[i, "del"] <- 1
+          break
+        }
+      }
+    }
+  })
+  
+  getManifoldPCA <- reactive({
+    princomp(getFilteredSubTable(), cor = TRUE)
+  })
+  
+  getLPCA <- reactive({
+    princomp(values$L, cor = TRUE)
+  })
+  
+  output$manifoldpca <- renderPlot({
+    pca <- getManifoldPCA()
+    autoplot(pca, colour="blue")
+  })
+  
+  output$lpca <- renderPlot({
+    validate(
+      need(values$L, "Сгенерируйте множество L")
+    )
+    lpca <- getLPCA()
+    autoplot(lpca, colour="red")
+  })
 }
 
 ui = tagList(
@@ -667,6 +756,8 @@ ui = tagList(
                h5("Строки подбазы"),
                textInput("subsetRows", label=""),
                tags$hr(),
+               selectizeInput("elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE),
+               tags$hr(),
                actionButton("addFilter", "Добавить фильтр"),
                tags$div(id = "filterPanel"),
                tags$hr(),
@@ -685,6 +776,23 @@ ui = tagList(
                tags$hr(),
                h2("Подбаза"),
                DT::dataTableOutput("subtable")
+             )
+    ),
+    tabPanel("Многообразие",
+             sidebarPanel(
+               fluidRow(
+                 column(4, numericInput("LN", "N", 100)),
+                 column(7, actionButton("generateL", "Добавить множество L", class="btn-info"))
+               ),
+               tags$hr(),
+               fluidRow(
+                 column(4, numericInput("eps", "Epsilon", 1)),
+                 column(7, actionButton("removeM", "Удалить множество M", class="btn-danger"))
+               )
+             ),
+             mainPanel(
+               plotOutput("manifoldpca"),
+               plotOutput("lpca")
              )
     ),
     tabPanel("Информация",
@@ -713,14 +821,20 @@ ui = tagList(
                radioButtons("clusteringMethod", "Метод кластеризации", 
                             choices=c("одиночной связи"="single",
                                       "средней связи"="average",
-                                      "полной связи"="complete"
+                                      "полной связи"="complete",
+                                      "k-means"="kmeans"
                                       ),
                             selected = c("single")),
+               # radioButtons("metric", "Метрика",
+               #              choices=c("евклидова"="euclid",
+               #                        "Махаланобиса"="mahalanobis"),
+               #              selected = c("euclid")),
                numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
                tags$hr(),
-               selectizeInput(
-                 "elementNames", "Использовать в качестве названия", choices = NULL, multiple = FALSE
-               ),
+               h4("Главные компоненты"),
+               fluidRow(column(4, selectInput("pc1", "PC1", choices=c())),
+                        column(4, selectInput("pc2", "PC2", choices=c())),
+                        column(4, selectInput("pc3", "PC3", choices=c()))),
                tags$hr(),
                downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success")
              ),
