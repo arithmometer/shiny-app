@@ -23,6 +23,7 @@ server <- function(input, output, clientData, session) {
   values <- reactiveValues()
   values$uploaded <- FALSE
   values$generated <- FALSE
+  values$processedL <- FALSE
   values$insertedFilters <- c()
   values$insertedSorts <- c()
 
@@ -463,7 +464,12 @@ server <- function(input, output, clientData, session) {
     values$generated
   })
   
+  output$processedL <- reactive({
+    values$processedL
+  })
+  
   outputOptions(output, "generated", suspendWhenHidden=FALSE)
+  outputOptions(output, "processedL", suspendWhenHidden=FALSE)
   
   observeEvent(input$insertBlob, {
     values$generated <- FALSE
@@ -654,6 +660,7 @@ server <- function(input, output, clientData, session) {
     })
     df <- do.call(cbind.data.frame, l)
     colnames(df) <- sapply(1:M, function(i) paste0("X", i))
+    df["del"] <- 0
     values$L <- df
   })
   
@@ -666,21 +673,29 @@ server <- function(input, output, clientData, session) {
     names <- rownames(x)
     for(i in 1:nrow(x)) {
       for(j in 1:nrow(values$L)) {
-        d <- dst2(unlist(values$L[j, ]), unlist(x[i, ]), ncol(values$L))
+        d <- dst2(unlist(values$L[j, ]), unlist(x[i, ]), ncol(values$L) - 1)
         if(d < input$eps**2) {
-          values$df[i, "del"] <- 1
+          values$L[i, "del"] <- 1
           break
         }
       }
     }
+    values$processedL <- TRUE
   })
+  
+  output$downloadL <- downloadHandler(
+    filename = "manifold_L.csv",
+    content = function(file) {
+      write.table(values$L, file, sep=",", row.names = FALSE)
+    }
+  )
   
   getManifoldPCA <- reactive({
     princomp(getFilteredSubTable(), cor = TRUE)
   })
   
   getLPCA <- reactive({
-    princomp(values$L, cor = TRUE)
+    princomp(subset(values$L, select=-del), cor = TRUE)
   })
   
   output$manifoldpca <- renderPlot({
@@ -788,7 +803,10 @@ ui = tagList(
                fluidRow(
                  column(4, numericInput("eps", "Epsilon", 1)),
                  column(7, actionButton("removeM", "Удалить множество M", class="btn-danger"))
-               )
+               ),
+               conditionalPanel(condition = "output.processedL", 
+                                downloadButton("downloadL", "Скачать множество L", class="btn-success")
+                                )
              ),
              mainPanel(
                plotOutput("manifoldpca"),
