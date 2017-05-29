@@ -27,6 +27,7 @@ server <- function(input, output, clientData, session) {
   values$uploaded <- FALSE
   values$tsuploaded <- FALSE
   values$generated <- FALSE
+  values$decimated <- FALSE
   values$generatedL <- FALSE
   values$processedL <- FALSE
   values$insertedFilters <- c()
@@ -250,18 +251,6 @@ server <- function(input, output, clientData, session) {
     ggdendrogram(df)
   })
   
-  # getDist <- reactive({
-  #   x <- getFilteredSubTable()
-  #   if(input$metric == "euclid") {
-  #     d <- dist(x)  
-  #   } else {
-  #     center <- colMeans(x)
-  #     covar <- cov(x)
-  #     d <- sqrt(mahalanobis(x, center, covar)) # возвращает квадраты расстояний
-  #   }
-  #   d
-  # })
-  
   getDist <- reactive({
     dist(getFilteredSubTable())
   })
@@ -377,7 +366,21 @@ server <- function(input, output, clientData, session) {
   output$downloadGenerated <- downloadHandler(
     filename = "generated_dataset.csv",
     content = function(file) {
-      write.table(getTable(), file, sep=",", row.names = FALSE)
+      write.table(values$df, file, sep=",", row.names = FALSE)
+    }
+  )
+  
+  output$downloadGenerated2 <- downloadHandler(
+    filename = "generated_dataset.csv",
+    content = function(file) {
+      write.table(values$df, file, sep=",", row.names = FALSE)
+    }
+  )
+  
+  output$downloadDecimated <- downloadHandler(
+    filename = "generated_dataset.csv",
+    content = function(file) {
+      write.table(values$df, file, sep=",", row.names = FALSE)
     }
   )
   
@@ -475,11 +478,16 @@ server <- function(input, output, clientData, session) {
     values$generated
   })
   
+  output$decimated <- reactive({
+    values$decimated
+  })
+  
   output$processedL <- reactive({
     values$processedL
   })
   
   outputOptions(output, "generated", suspendWhenHidden=FALSE)
+  outputOptions(output, "decimated", suspendWhenHidden=FALSE)
   outputOptions(output, "processedL", suspendWhenHidden=FALSE)
   
   observeEvent(input$insertBlob, {
@@ -556,13 +564,13 @@ server <- function(input, output, clientData, session) {
   })
   
   observeEvent(input$insertBlackhole, {
-    values$generated <- FALSE
+    # values$generated <- FALSE
     btn <- input$insertBlackhole
     id <- paste0("blackhole", btn)
     values[[paste0(id, "_M")]] <- input$M
     
     insertUI(
-      selector = "#generatorPanel",
+      selector = "#decimationPanel",
       ui = tags$div(
         wellPanel(
           h4(paste0("Центр дыры ", btn, ":")),
@@ -599,6 +607,11 @@ server <- function(input, output, clientData, session) {
         ok <- FALSE
       }
     }
+    return(ok)
+  }
+  
+  validateDecimator <- function() {
+    ok <- TRUE
     for(id in insertedBlackholes) {
       if(values[[paste0(id, "_M")]] != input$M) {
         showNotification(paste0("Количество измерений в дыре ", substring(id, 10), " неверно"), type="error")
@@ -647,20 +660,26 @@ server <- function(input, output, clientData, session) {
       }
       df["del"] <- rep(0, nrow(df))
 
+      df <- cbind("id" = seq.int(nrow(df)), df)
+      updateNumericInput(session, "LN", value=nrow(df))
+      values$df <- df
+    }
+  })
+  
+  observeEvent(input$decimate, {
+    if(validateDecimator()) {
       for(id in insertedBlackholes) {
-        for(j in 1:nrow(df)) {
-          dist <- sum((unlist(subset(df[j, ], select=-del)) - unlist(lapply(1:input$M, function(i) as.double(input[[paste0(id, "_x", i)]]))))**2)
-          if(dist < input[[paste0(id, "_r")]]**2) {
-            p <- bell(dist / (2 * input[[paste0(id, "_r")]]) + 0.5, input[[paste0(id, "_v")]])
+        for(j in 1:nrow(values$df)) {
+          d <- sum((unlist(subset(values$df[j, ], select=-del)) - unlist(lapply(1:input$M, function(i) as.double(input[[paste0(id, "_x", i)]]))))**2)
+          if(d < input[[paste0(id, "_r")]]**2) {
+            p <- bell(sqrt(d) / (2 * input[[paste0(id, "_r")]]) + 0.5, input[[paste0(id, "_v")]])
             if(rbinom(1, 1, p)) {
-              df[j, "del"] <- 1
+              values$df[j, "del"] <- 1
             }
           }
         }
       }
-      df <- cbind("id" = seq.int(nrow(df)), df)
-      updateNumericInput(session, "LN", value=nrow(df))
-      values$df <- df
+      values$decimated <- TRUE
     }
   })
   
@@ -765,7 +784,6 @@ ui = tagList(
                numericInput("M", "Размерность M", 1, min=1, max=10),
                tags$hr(),
                actionButton("insertBlob", "Добавить набор"),
-               actionButton("insertBlackhole", "Добавить дыру"),
                tags$hr(),
                fluidRow(
                  column(4, actionButton("generate", "Сгенерировать", class="btn-info")),
@@ -801,9 +819,24 @@ ui = tagList(
                tags$div(id = "generatorPanel")
              )
     ),
+    tabPanel("Прореживание",
+             sidebarPanel(
+             actionButton("insertBlackhole", "Добавить дыру"),
+             tags$hr(),
+             fluidRow(
+               column(4, actionButton("decimate", "Проредить", class="btn-info")),
+               column(4, conditionalPanel(condition = "output.decimated", p("Прорежено!"))),
+               column(4, downloadButton("downloadDecimated", "Скачать", class="btn-success"))
+             )
+           ),
+           mainPanel(
+             tags$div(id = "decimationPanel")
+           )
+    ),
     tabPanel("Полная таблица",
       mainPanel(
-        DT::dataTableOutput("fulltable")
+        DT::dataTableOutput("fulltable"),
+        downloadButton("downloadGenerated2", "Скачать", class="btn-success")
       )
     ),
     tabPanel("Таблица",
