@@ -7,6 +7,8 @@ library(igraph)
 library(rmutil)
 library(mc2d)
 library(ggfortify)
+library(Rtsne)
+library(Rssa)
 
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
@@ -14,6 +16,7 @@ options(shiny.maxRequestSize = 1024*1024^2)
 
 server <- function(input, output, clientData, session) {
   inFile <- reactive(input$datafile)
+  tsFile <- reactive(input$timeseriesfile)
   
   subsetCols <- c()
   subsetRows <- c()
@@ -22,7 +25,9 @@ server <- function(input, output, clientData, session) {
 
   values <- reactiveValues()
   values$uploaded <- FALSE
+  values$tsuploaded <- FALSE
   values$generated <- FALSE
+  values$generatedL <- FALSE
   values$processedL <- FALSE
   values$insertedFilters <- c()
   values$insertedSorts <- c()
@@ -34,6 +39,12 @@ server <- function(input, output, clientData, session) {
     }
     values$uploaded <- TRUE
     values$generated <- FALSE
+    updateNumericInput(session, "LN", value=nrow(values$df))
+  })
+  
+  observeEvent(input$timeseriesfile, {
+    values$ts <- read.csv(tsFile()$datapath, header = input$tsheader, sep = input$tssep)
+    values$tsuploaded <- TRUE
   })
   
   getFullTable <- reactive({
@@ -216,9 +227,9 @@ server <- function(input, output, clientData, session) {
     )
     
     validate(
-      need(as.numeric(getFilteredSubTable()[, input$infoColumn]), "Выберите числовой столбец")
+      need(is.numeric(getFilteredSubTable()[, input$infoColumn]), "Выберите числовой столбец")
     )
-    
+
     x <- getFilteredSubTable()[, input$infoColumn]
     fit <- density(x)
     
@@ -438,7 +449,7 @@ server <- function(input, output, clientData, session) {
       selector = "#sortPanel",
       ui = tags$div(
         wellPanel(
-          fluidRow(column(5, selectizeInput(paste0(id, "sortcol"), "", choices = values$colnames)),
+          fluidRow(column(4, selectizeInput(paste0(id, "sortcol"), "", choices = values$colnames)),
                    column(6, selectizeInput(paste0(id, "asc"), "", multiple = F, choices = list("по возрастанию", "по убыванию"))),
                    column(1, actionButton(paste0(id, "delete"), "x", class="btn-danger"))
           )
@@ -481,7 +492,7 @@ server <- function(input, output, clientData, session) {
       ui = tags$div(
         wellPanel(
           h4(paste0("Параметры набора ", btn, ":")),
-          numericInput(paste0(id, "_N"), "N", 10, min=1, max=1000),
+          numericInput(paste0(id, "_N"), "Количество точек", 10, min=1, max=1000),
           lapply(1:input$M, function(i) {
             fluidRow(
               column(3, selectInput(paste0(id, "_distr", i), label = paste0("X", i),
@@ -648,6 +659,7 @@ server <- function(input, output, clientData, session) {
         }
       }
       df <- cbind("id" = seq.int(nrow(df)), df)
+      updateNumericInput(session, "LN", value=nrow(df))
       values$df <- df
     }
   })
@@ -662,6 +674,7 @@ server <- function(input, output, clientData, session) {
     colnames(df) <- sapply(1:M, function(i) paste0("X", i))
     df["del"] <- 0
     values$L <- df
+    values$generatedL <- TRUE
   })
   
   dst2 <- function(x, y, n) {
@@ -689,26 +702,57 @@ server <- function(input, output, clientData, session) {
       write.table(values$L, file, sep=",", row.names = FALSE)
     }
   )
-  
-  getManifoldPCA <- reactive({
-    princomp(getFilteredSubTable(), cor = TRUE)
+
+  output$manifold <- renderPlot({
+    set.seed(42)
+    tsne_out <- Rtsne(getFilteredSubTable(), perplexity=input$perplexity)
+    plot(tsne_out$Y, pch=19, col="blue", xlab="X1", ylab="X2")
+    if(values$generatedL) {
+      tsne_L <- Rtsne(values$L, perplexity=input$perplexity)
+      points(tsne_L$Y, pch=19, col="red")
+    }
   })
   
-  getLPCA <- reactive({
-    princomp(subset(values$L, select=-del), cor = TRUE)
-  })
-  
-  output$manifoldpca <- renderPlot({
-    pca <- getManifoldPCA()
-    autoplot(pca, colour="blue")
-  })
-  
-  output$lpca <- renderPlot({
+  observeEvent(input$ssaDecompose, {
     validate(
-      need(values$L, "Сгенерируйте множество L")
+      need(values$ts, "Загрузите временной ряд")
     )
-    lpca <- getLPCA()
-    autoplot(lpca, colour="red")
+    values$s <- ssa(values$ts, L = input$ssaL, neig = input$ssaN)
+  })
+  
+  output$ts <- renderPlotly({
+    validate(
+      need(values$ts, "Загрузите временной ряд")
+    )
+    plot_ly(y=values$ts[, 2], type="scatter", mode="lines")
+  })
+  
+  output$wcor <- renderPlot({
+    validate(
+      need(values$s, "Выполните разложение ряда")
+    )
+    plot(wcor(values$s))
+  })
+  
+  output$scree <- renderPlot({
+    validate(
+      need(values$s, "Выполните разложение ряда")
+    )
+    plot(values$s)
+  })
+  
+  output$paired <- renderUI({
+    validate(
+      need(values$s, "Выполните разложение ряда")
+    )
+    do.call(tabsetPanel, lapply(0:((input$ssaN + 19) %/% 20 - 1), function(i) {
+      last <- i * 20 + 20
+      if(i * 20 + 20 >= input$ssaN) {
+        last <- input$ssaN - 1
+      }
+      output[[paste0("paired_", i)]] <- renderPlot(plot(values$s, type = "paired", idx = (i * 20 + 1):last))
+      tabPanel(paste0(i * 20 + 1, "-", i * 20 + 20), plotOutput(paste0("paired_", i)))
+    }))
   })
 }
 
@@ -718,7 +762,7 @@ ui = tagList(
     "Clustering",
     tabPanel("Генерация",
              sidebarPanel(
-               numericInput("M", "M", 1, min=1, max=10),
+               numericInput("M", "Размерность M", 1, min=1, max=10),
                tags$hr(),
                actionButton("insertBlob", "Добавить набор"),
                actionButton("insertBlackhole", "Добавить дыру"),
@@ -795,6 +839,8 @@ ui = tagList(
     ),
     tabPanel("Многообразие",
              sidebarPanel(
+               numericInput("perplexity", "Перплексия t-SNE", value=10),
+               tags$hr(),
                fluidRow(
                  column(4, numericInput("LN", "N", 100)),
                  column(7, actionButton("generateL", "Добавить множество L", class="btn-info"))
@@ -809,8 +855,7 @@ ui = tagList(
                                 )
              ),
              mainPanel(
-               plotOutput("manifoldpca"),
-               plotOutput("lpca")
+               plotOutput("manifold")
              )
     ),
     tabPanel("Информация",
@@ -864,6 +909,47 @@ ui = tagList(
                plotlyOutput("pca"),
                h4("Кластеры"),
                plotlyOutput("graph")
+             )
+    ),
+    tabPanel("SSA",
+             sidebarPanel(
+               fileInput("timeseriesfile", "Выбрать файл для загрузки",
+                         accept = c(
+                           "text/csv",
+                           "text/comma-separated-values",
+                           "text/tab-separated-values",
+                           "text/plain",
+                           ".csv",
+                           ".tsv"
+                         ),
+                         buttonLabel="Загрузить ряд",
+                         placeholder="Файл не выбран"
+               ),
+               tags$hr(),
+               checkboxInput("tsheader", "Заголовок", TRUE),
+               radioButtons("tssep", "Разделитель:",
+                            c("Запятая"=",",
+                              "Точка с запятой"=";",
+                              "Табуляция"="\t"),
+                            ","),
+               tags$hr(),
+               numericInput("ssaL", "Длина окна L", value=100, min=1),
+               numericInput("ssaN", "Количество компонент разложения", value=50, min=1),
+               actionButton("ssaDecompose", "Выполнить разложение", class="btn-info"),
+               tags$hr(),
+               p("Для тестирования можете загрузить пример файла",
+                 a(href = "wines.csv", "wines.csv")
+               )
+             ),
+             mainPanel(
+               h4("График временного ряда"),
+               plotlyOutput("ts"),
+               h4("График w-корреляций"),
+               plotOutput("wcor"),
+               h4("График собственных чисел"),
+               plotOutput("scree"),
+               h4("Парные графики собственных векторов"),
+               uiOutput("paired")
              )
     )
   )
