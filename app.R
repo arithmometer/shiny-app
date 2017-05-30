@@ -271,6 +271,7 @@ server <- function(input, output, clientData, session) {
       hc <- getHC()
       clusters <- cutree(hc, k = input$numClusters)
     }
+    updateSelectInput(session, "clusterNumber", choices = 1:input$numClusters)
     clusters
   })
   
@@ -710,19 +711,17 @@ server <- function(input, output, clientData, session) {
     values$generatedL <- TRUE
   })
   
-  dst2 <- function(x, y, n) {
-    sum((x[1:n] - y[1:n])**2)
+  dst2 <- function(x, y) {
+    sum((x - y)**2)
   }
   
   observeEvent(input$removeM, {
     x <- getFilteredSubTable()
-    names <- rownames(x)
     for(i in 1:nrow(x)) {
       for(j in 1:nrow(values$L)) {
-        d <- dst2(unlist(values$L[j, ]), unlist(x[i, ]), ncol(values$L) - 1)
+        d <- dst2(unlist(subset(values$L[j, ], select=-del)), unlist(x[i, ]))
         if(d < input$eps**2) {
-          values$L[i, "del"] <- 1
-          break
+          values$L[j, "del"] <- 1
         }
       }
     }
@@ -735,17 +734,41 @@ server <- function(input, output, clientData, session) {
       write.table(values$L, file, sep=",", row.names = FALSE)
     }
   )
+  
+  output$downloadCluster <- downloadHandler(
+    filename = paste0("cluster", input$clusterNumber, ".csv"),
+    content = function(file) {
+      write.table(getFilteredSubTable()[getClusters() == input$clusterNumber, ], file, sep=",", row.names = FALSE)
+    }
+  )
 
   output$manifold <- renderPlot({
-    set.seed(42)
-    tsne_out <- Rtsne(getFilteredSubTable(), perplexity=input$perplexity)
-    dat <- data.frame(X1=tsne_out$Y[, 1], X2=tsne_out$Y[, 2])
-    g <- ggplot(dat, aes(x=X1, y=X2)) + 
-      geom_point(color="blue")
-    if(values$generatedL) {
-      tsne_L <- Rtsne(values$L, perplexity=input$perplexity)
-      dat2 <- data.frame(X1=tsne_L$Y[, 1], X2=tsne_L$Y[, 2])
-      g <- g + geom_point(dat2, mapping = aes(x=X1, y=X2, color="red"))
+    if((ncol(getFilteredSubTable()) != 2) || (input$visualisation != "dd")) {
+      set.seed(42)
+      df <- unique(getFilteredSubTable())
+      tsne_out <- Rtsne(df, perplexity=input$perplexity)
+      dat <- data.frame(X1=tsne_out$Y[, 1], X2=tsne_out$Y[, 2])
+      g <- ggplot(dat, aes(x=X1, y=X2)) + 
+        geom_point(color="blue")
+      if(values$generatedL) {
+        dfL <- unique(values$L[values$L["del"] == 0, ])
+        tsne_L <- Rtsne(dfL, perplexity=input$perplexity)
+        dat2 <- data.frame(X1=tsne_L$Y[, 1], X2=tsne_L$Y[, 2])
+        if(nrow(dat2) > 0) {
+          g <- g + geom_point(dat2, mapping = aes(x=X1, y=X2, color="red"))
+        }
+      }
+    } else {
+      dat <- data.frame(X1=getFilteredSubTable()[, 1], X2=getFilteredSubTable()[, 2])
+      g <- ggplot(dat, aes(x=X1, y=X2)) +
+        geom_point(color="blue")
+      if(values$generatedL) {
+        dfL <- values$L[values$L["del"] == 0, ]
+        dat2 <- data.frame(X1=dfL[, 1], X2=dfL[, 2])
+        if(nrow(dat2) > 0) {
+          g <- g + geom_point(dat2, mapping = aes(x=X1, y=X2, color="red"))
+        }
+      }
     }
     g
   })
@@ -790,6 +813,21 @@ server <- function(input, output, clientData, session) {
       output[[paste0("paired_", i)]] <- renderPlot(plot(values$s, type = "paired", idx = (i * 20 + 1):last))
       tabPanel(paste0(i * 20 + 1, "-", i * 20 + 20), plotOutput(paste0("paired_", i)))
     }))
+  })
+  
+  output$visualisationChoice <- renderUI({
+    if(ncol(getFilteredSubTable()) == 2) {
+      radioButtons("visualisation", "Тип визуализации",
+                   choices=c("t-SNE"="tsne",
+                             "2D"="dd"),
+                   selected = c("tsne"))
+    }
+  })
+  
+  output$perplexity <- renderUI({
+    if((ncol(getFilteredSubTable()) != 2) || (input$visualisation != "dd")) {
+      numericInput("perplexity", "Перплексия t-SNE", value=10)
+    }
   })
 }
 
@@ -890,7 +928,8 @@ ui = tagList(
     ),
     tabPanel("Многообразие",
              sidebarPanel(
-               numericInput("perplexity", "Перплексия t-SNE", value=10),
+               uiOutput("visualisationChoice"),
+               uiOutput("perplexity"),
                tags$hr(),
                fluidRow(
                  column(4, numericInput("LN", "N", 100)),
@@ -947,7 +986,10 @@ ui = tagList(
                         column(4, selectInput("pc2", "PC2", choices=c())),
                         column(4, selectInput("pc3", "PC3", choices=c()))),
                tags$hr(),
-               downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success")
+               downloadButton("downloadDist", "Скачать матрицу смежности", class="btn-success"),
+               tags$hr(),
+               fluidRow(column(5, selectInput("clusterNumber", "Номер кластера", choices=c())),
+                        column(4, downloadButton("downloadCluster", "Скачать кластер", class="btn-success")))
              ),
              mainPanel(
                h4("Дендрограмма:"),
