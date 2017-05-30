@@ -10,6 +10,8 @@ library(ggfortify)
 library(Rtsne)
 library(Rssa)
 
+source("k_means_mahalanobis.R")
+
 # By default, the file size limit is 5MB. It can be changed by
 # setting this option. Here we'll raise limit to 1024MB.
 options(shiny.maxRequestSize = 1024*1024^2)
@@ -261,12 +263,24 @@ server <- function(input, output, clientData, session) {
   
   getClusters <- reactive({
     if(input$clusteringMethod == "kmeans") {
-      clusters <- kmeans(getFilteredSubTable(), input$numClusters)$cluster
+      distFunc <- switch(input$kmeansmetric,
+                         "euclid"=distEuclid,
+                         "mahalanobis"=distMahalanobis)
+      clusters <- KMeans(as.matrix(getFilteredSubTable()), input$numClusters, distFunc = )$class
     } else {
       hc <- getHC()
       clusters <- cutree(hc, k = input$numClusters)
     }
     clusters
+  })
+  
+  output$metric <- renderUI({
+    if(input$clusteringMethod == "kmeans") {
+      radioButtons("kmeansmetric", "Метрика",
+                   choices=c("евклидова"="euclid",
+                             "Махаланобиса"="mahalanobis"),
+                   selected = c("euclid"))
+    }
   })
   
   getPCA <- reactive({
@@ -725,11 +739,15 @@ server <- function(input, output, clientData, session) {
   output$manifold <- renderPlot({
     set.seed(42)
     tsne_out <- Rtsne(getFilteredSubTable(), perplexity=input$perplexity)
-    plot(tsne_out$Y, pch=19, col="blue", xlab="X1", ylab="X2")
+    dat <- data.frame(X1=tsne_out$Y[, 1], X2=tsne_out$Y[, 2])
+    g <- ggplot(dat, aes(x=X1, y=X2)) + 
+      geom_point(color="blue")
     if(values$generatedL) {
       tsne_L <- Rtsne(values$L, perplexity=input$perplexity)
-      points(tsne_L$Y, pch=19, col="red")
+      dat2 <- data.frame(X1=tsne_L$Y[, 1], X2=tsne_L$Y[, 2])
+      g <- g + geom_point(dat2, mapping = aes(x=X1, y=X2, color="red"))
     }
+    g
   })
   
   observeEvent(input$ssaDecompose, {
@@ -921,10 +939,7 @@ ui = tagList(
                                       "k-means"="kmeans"
                                       ),
                             selected = c("single")),
-               # radioButtons("metric", "Метрика",
-               #              choices=c("евклидова"="euclid",
-               #                        "Махаланобиса"="mahalanobis"),
-               #              selected = c("euclid")),
+               uiOutput("metric"),
                numericInput("numClusters", "Количество кластеров", value = 3, min = 1),
                tags$hr(),
                h4("Главные компоненты"),
