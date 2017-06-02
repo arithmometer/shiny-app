@@ -707,6 +707,7 @@ server <- function(input, output, clientData, session) {
     df <- do.call(cbind.data.frame, l)
     colnames(df) <- sapply(1:M, function(i) paste0("X", i))
     df["del"] <- 0
+    df <- cbind("id" = seq.int(nrow(df)), df)
     values$L <- df
     values$generatedL <- TRUE
   })
@@ -719,7 +720,7 @@ server <- function(input, output, clientData, session) {
     x <- getFilteredSubTable()
     for(i in 1:nrow(x)) {
       for(j in 1:nrow(values$L)) {
-        d <- dst2(unlist(subset(values$L[j, ], select=-del)), unlist(x[i, ]))
+        d <- dst2(unlist(subset(values$L[j, ], select=-c(id, del))), unlist(x[i, ]))
         if(d < input$eps**2) {
           values$L[j, "del"] <- 1
         }
@@ -752,6 +753,7 @@ server <- function(input, output, clientData, session) {
         geom_point(color="blue")
       if(values$generatedL) {
         dfL <- unique(values$L[values$L["del"] == 0, ])
+        dfL <- subset(dfL, select=-c(id, del))
         tsne_L <- Rtsne(dfL, perplexity=input$perplexity)
         dat2 <- data.frame(X1=tsne_L$Y[, 1], X2=tsne_L$Y[, 2])
         if(nrow(dat2) > 0) {
@@ -764,6 +766,7 @@ server <- function(input, output, clientData, session) {
         geom_point(color="blue")
       if(values$generatedL) {
         dfL <- values$L[values$L["del"] == 0, ]
+        dfL <- subset(dfL, select=-c(id, del))
         dat2 <- data.frame(X1=dfL[, 1], X2=dfL[, 2])
         if(nrow(dat2) > 0) {
           g <- g + geom_point(dat2, mapping = aes(x=X1, y=X2, color="red"))
