@@ -685,7 +685,7 @@ server <- function(input, output, clientData, session) {
     if(validateDecimator()) {
       for(id in insertedBlackholes) {
         for(j in 1:nrow(values$df)) {
-          d <- sum((unlist(subset(values$df[j, ], select=-del)) - unlist(lapply(1:input$M, function(i) as.double(input[[paste0(id, "_x", i)]]))))**2)
+          d <- sum((unlist(subset(values$df[j, ], select=-c(id, del))) - unlist(lapply(1:input$M, function(i) as.double(input[[paste0(id, "_x", i)]]))))**2)
           if(d < input[[paste0(id, "_r")]]**2) {
             p <- bell(sqrt(d) / (2 * input[[paste0(id, "_r")]]) + 0.5, input[[paste0(id, "_v")]])
             if(rbinom(1, 1, p)) {
