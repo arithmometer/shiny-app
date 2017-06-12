@@ -30,6 +30,7 @@ server <- function(input, output, clientData, session) {
   values$tsuploaded <- FALSE
   values$generated <- FALSE
   values$decimated <- FALSE
+  values$decimated_every <- FALSE
   values$generatedL <- FALSE
   values$processedL <- FALSE
   values$insertedFilters <- c()
@@ -497,12 +498,17 @@ server <- function(input, output, clientData, session) {
     values$decimated
   })
   
+  output$decimated_every <- reactive({
+    values$decimated_every
+  })
+  
   output$processedL <- reactive({
     values$processedL
   })
   
   outputOptions(output, "generated", suspendWhenHidden=FALSE)
   outputOptions(output, "decimated", suspendWhenHidden=FALSE)
+  outputOptions(output, "decimated_every", suspendWhenHidden=FALSE)
   outputOptions(output, "processedL", suspendWhenHidden=FALSE)
   
   observeEvent(input$insertBlob, {
@@ -698,6 +704,11 @@ server <- function(input, output, clientData, session) {
     }
   })
   
+  observeEvent(input$decimate_every, {
+    values$df[-seq(1, to = nrow(values$df), by = input$everyn), "del"] <- 1
+    values$decimated_every <- TRUE
+  })
+  
   observeEvent(input$generateL, {
     x <- getFilteredSubTable()
     M <- ncol(x)
@@ -886,6 +897,12 @@ ui = tagList(
                column(4, actionButton("decimate", "Проредить", class="btn-info")),
                column(4, conditionalPanel(condition = "output.decimated", p("Прорежено!"))),
                column(4, downloadButton("downloadDecimated", "Скачать", class="btn-success"))
+             ),
+             tags$hr(),
+             numericInput("everyn", "Использовать каждый", 1),
+             fluidRow(
+               column(4, actionButton("decimate_every", "Проредить", class="btn-info")),
+               column(4, conditionalPanel(condition = "output.decimated_every", p("Прорежено!")))
              )
            ),
            mainPanel(
